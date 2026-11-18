@@ -32,7 +32,7 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Python 3.10+ is supported. Use the same environment for all scripts. For a quick code smoke test, set `$env:PATHSNAP_OBS_PER_TRIP="12"` before running the training/tuning scripts; set `$env:PATHSNAP_TUNE_TRIALS="2"` for a quick tuning check. Remove both overrides for the full experiment (defaults: 120 observations per trip and 30 tuning trials).
+Python 3.10+ is supported. Use the same environment for all scripts. For a quick tuning smoke test, set `$env:PATHSNAP_TUNE_TRIALS="2"` and `$env:PATHSNAP_DECODER_TRIALS="2"`. Remove these overrides for the full experiment (defaults: 60 classifier trials and 60 decoder trials). Training and inference always use the complete original GPS tracks.
 
 ## Reproducible experiment workflow
 
@@ -43,6 +43,7 @@ python scripts/preprocess.py
 python scripts/explore.py
 python scripts/train.py
 python scripts/tune.py
+python scripts/tune_decoder.py
 python scripts/evaluate.py
 python scripts/visualize.py
 python -m unittest discover -s tests -v
@@ -53,19 +54,20 @@ After the model and decoder settings are finalized, run `python scripts/evaluate
 ### What each stage does
 
 1. **Preprocessing / audit** (`scripts/preprocess.py`, `pathsnap/core.py`): parses whitespace-delimited files, coerces numeric fields, removes invalid GPS rows, sorts observations chronologically without inventing interpolated positions, validates directed arc endpoints and records missing/invalid rows, timestamps, gaps, geography and network statistics.
-2. **Feature engineering** (`pathsnap/core.py`): builds a local metric coordinate plane; indexes directed-road midpoints with a KD-tree; retrieves the eight nearest candidates; computes point-to-segment cross-track distance, heading difference, road length/bearing, GPS speed, time gap, heading change, candidate rank, projection fraction, heading alignment and GPS displacement.
-3. **Five-model experiment** (`scripts/train.py`): Logistic Regression, KNN, Decision Tree, Random Forest and Extra Trees; median imputation is fitted inside each model pipeline and scaling is applied to LR/KNN. Uses 3-fold `GroupKFold` with trip ID as group. Reports training candidate metrics, CV Macro F1, student-test candidate metrics, observation Top-1 Accuracy, route continuity, log loss and runtime. Confusion matrices and tree feature-importance plots are saved.
-4. **Bayesian optimisation** (`scripts/tune.py`): Optuna TPE search for Random Forest using only training trips and 3-fold trip-grouped observation-level Top-1 accuracy. Saves trial history, best configuration, tuned model and a tuned-vs-untuned comparison on the same student-test partition.
-5. **Sequential decoding** (`scripts/evaluate.py`): compares classifier-only predictions with Viterbi decoding on student-test trips. A large timestamp gap resets the transition constraint so the decoder does not force continuity across a trajectory dropout.
-6. **Visualisation** (`scripts/visualize.py`): creates actual-result comparison plots and an interactive Folium map.
+2. **Feature engineering** (`pathsnap/core.py`): builds a local metric coordinate plane; indexes directed-road midpoints with a KD-tree; uses a complete in-radius segment shortlist plus a nearest-midpoint fallback, ranks candidates by exact point-to-segment distance, and computes geometric, motion and circular-direction features. Training, validation and API inference all retain the original full-resolution GPS sequence; temporal features are never calculated on downsampled tracks.
+3. **Five-model experiment** (`scripts/train.py`): Logistic Regression, KNN, Decision Tree, Random Forest and Extra Trees; median imputation is fitted inside each model pipeline and scaling is applied to LR/KNN. Uses 5-fold `GroupKFold` with trip ID as group and selects the model by mean observation-level Top-1 accuracy. Candidate groups with no positive candidate are excluded from classifier fitting, but remain included in observation-level evaluation so candidate misses count as errors. The student-test partition is reported separately and is never used to select the model. Confusion matrices and tree feature-importance plots are saved.
+4. **Classifier Bayesian optimisation** (`scripts/tune.py`): Optuna TPE search for the classifier selected by training-only 5-fold trip-grouped observation-level Top-1 accuracy. Saves trial history, best configuration and tuned model.
+5. **Decoder Bayesian optimisation** (`scripts/tune_decoder.py`): generates out-of-fold predictions for training trips and tunes HMM transition penalty, gap reset, movement feasibility and emission distance scale. Student-test and evaluator labels are not used.
+6. **Sequential decoding** (`scripts/evaluate.py`): compares classifier-only predictions with movement-aware Viterbi decoding on student-test trips. Repeated observations on the same arc are valid transitions; a long timestamp gap relaxes continuity constraints.
+7. **Visualisation** (`scripts/visualize.py`): creates actual-result comparison plots and an interactive Folium map.
 
 ## Feature and label definitions
 
-The classifier is a candidate scorer: each GPS observation has up to eight nearby directed-road candidates. The positive candidate is the road segment with the smallest point-to-segment distance among the trip's supplied reference-route arcs. This is a **weak geometric label**, not independently verified ground truth. The candidate miss rate is recorded because the correct reference segment may not appear among the eight generated candidates.
+The classifier is a candidate scorer: each GPS observation has eight directed-road candidates. A KD-tree midpoint index is used as a broad-phase search, augmented by a radius that is large enough to include every segment within the configured GPS radius; candidates are then ranked by exact point-to-segment distance. The positive label is assigned by monotonic dynamic-programming alignment against the ordered reference route, with a small heading cost when GPS movement is observable. This remains a **weak geometric label**, not independently verified ground truth. Candidate misses are measured separately; observations whose true target is absent are excluded from binary classifier fitting rather than being mislabeled as all-negative examples.
 
 Reference routes are used in offline training/development scripts and, for final evaluator requests, loaded only after prediction to calculate aggregate server-side metrics. They never enter the inference feature matrix or decoder. Distances use a trip-local equirectangular metric approximation, suitable for the small spatial extent of an individual trip.
 
-**Metric levels:** `train_accuracy` and `student_test_candidate_accuracy` classify flattened candidate rows. `student_top1_accuracy` selects one candidate per GPS observation and compares its arc ID with the weak reference target. These are different metrics. Training accuracy is a resubstitution metric; use trip-grouped CV and student-test results to assess generalisation. The TPE search optimizes trip-grouped observation-level Top-1. The decoder comparison reports classifier and decoded Top-1 accuracy; continuity may improve while pointwise accuracy falls.
+**Primary metric:** observation-level Top-1 accuracy selects one candidate per GPS observation and compares its arc ID with the weak reference target. Candidate-level binary metrics are secondary diagnostics. Use trip-grouped CV for model selection and student-test only as a separate development check. Both classifier and decoder TPE searches optimize observation-level Top-1 using training-only folds.
 
 ## Key outputs
 
@@ -74,9 +76,12 @@ Reference routes are used in offline training/development scripts and, for final
 | Preprocessing audit | `pathsnap/results/preprocessing_audit.csv` |
 | Feature distributions | `pathsnap/results/feature_summary_by_trip.csv` |
 | Five-model comparison | `pathsnap/results/model_comparison.csv` |
+| Selected model and feature metadata | `pathsnap/models/model_selection.json`, `model_metadata.json` |
+| Five-model comparison | `pathsnap/results/model_comparison.csv` |
 | Confusion matrices | `pathsnap/visuals/confusion_*.png` |
 | Tree feature importance | `pathsnap/results/feature_importance_*.csv` |
-| Bayesian trials / best parameters | `pathsnap/results/bayesian_trials.csv`, `bayesian_best.json` |
+| Classifier Bayesian trials / best parameters | `pathsnap/results/bayesian_trials.csv`, `bayesian_best.json` |
+| Decoder Bayesian trials / best parameters | `pathsnap/results/decoder_trials.csv`, `pathsnap/models/decoder_metadata.json` |
 | Tuned vs untuned comparison | `pathsnap/results/tuned_vs_untuned.csv` |
 | HMM comparison | `pathsnap/results/route_decoder_comparison.csv`, `route_decoder_summary.json` |
 | Official evaluator score (one final run) | `pathsnap/results/evaluator_inference_accuracy.json`, `evaluator_inference_per_trip.csv` |
