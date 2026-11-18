@@ -1,6 +1,6 @@
 # PathSnap — Distributed Map-Matching & Route Reconstruction
 
-PathSnap reconstructs directed-road sequences from noisy GPS observations. The repository contains candidate generation, route-aligned weak labels, five required classifiers, Optuna classifier and decoder tuning, HMM/Viterbi decoding, a FastAPI service and a Leaflet UI.
+PathSnap reconstructs directed-road sequences from noisy GPS observations. The repository contains candidate generation, route-aligned weak labels, five classifiers, Optuna classifier and decoder tuning, HMM/Viterbi decoding, a FastAPI service and a Leaflet UI.
 
 ## Dataset layout
 
@@ -31,9 +31,9 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-`$env:PATHSNAP_CANDIDATE_POOL="64"` can be set to keep candidate generation identical across training, tuning, evaluation and API inference. The generated metadata records both candidate count and pool size; the API reads these values from the same metadata.
+`$env:PATHSNAP_CANDIDATE_POOL="64"` and `$env:PATHSNAP_CANDIDATE_RADIUS_M="50"` control candidate generation. The radius, pool and candidate count are recorded in model metadata and reused by tuning, evaluation and API inference. The generated metadata records both candidate count and pool size; the API reads these values from the same metadata.
 
-Python 3.10+ is supported. For a quick tuning smoke test, set `$env:PATHSNAP_TUNE_TRIALS="2"` and `$env:PATHSNAP_DECODER_TRIALS="2"`. The full experiment defaults to 60 classifier trials and 60 decoder trials. Training and inference always use the complete original GPS tracks. Existing committed model/result JSON files may predate the current 16-feature, full-resolution pipeline. They are historical outputs, not evidence of current performance; regenerate them by running the workflow from `train.py` onward. The API now refuses stale/mismatched model artifacts rather than silently serving them.
+Python 3.10+ is supported. For a quick tuning smoke test, set `$env:PATHSNAP_TUNE_TRIALS="2"` and `$env:PATHSNAP_DECODER_TRIALS="2"`. The full experiment defaults to 60 classifier trials and 60 decoder trials. Training and inference always use the complete original GPS tracks. Existing committed model/result files predate the current 23-feature, full-resolution pipeline. They are historical outputs, not evidence of current performance; regenerate them by running the workflow from `train.py` onward. The API now refuses stale/mismatched model artifacts rather than silently serving them.
 
 ## Reproducible workflow
 
@@ -41,6 +41,7 @@ Run from the repository root:
 
 ```powershell
 python scripts/explore.py
+python scripts/candidate_sweep.py
 python scripts/train.py
 python scripts/tune.py
 python scripts/tune_decoder.py
@@ -56,12 +57,12 @@ After model and decoder settings are frozen and the artifact check passes, run `
 
 ## Pipeline
 
-1. **Candidate generation** (`pathsnap/core.py`): a KD-tree midpoint index provides a broad-phase shortlist. The search radius is expanded by half the longest segment length, ensuring that every road segment within the configured GPS radius is included. A nearest-midpoint fallback is added, then exact point-to-segment distance ranks candidates. The best `k_candidates` directed arcs are retained (default: 8). The selected value and broad-phase candidate pool are recorded in `model_metadata.json` and reused by evaluation and the API.
-2. **Features**: geometric distance, heading difference, road length, GPS speed, time gap, heading change, candidate rank, projection fraction, heading alignment, displacement, circular bearing features and endpoint distances. All features are calculated on full-resolution tracks; training, validation and inference therefore use the same temporal semantics.
+1. **Candidate generation** (`pathsnap/core.py`): a KD-tree midpoint index provides a broad-phase shortlist. The search radius is expanded by half the longest segment length, then exact point-to-segment distance ranks candidates. The default radius is 50 m, with 8 directed candidates and a 64-arc midpoint pool. Run `scripts/candidate_sweep.py` to compare radii and candidate counts using training labels only. The chosen radius, count and pool are recorded in model metadata.
+2. **Features**: 23 features combine the original geometry/motion signals with candidate-context signals: distance above the nearest candidate, candidate count, projected-candidate distance to adjacent GPS fixes, turn rate, and nearest projected-candidate distances on the previous and next observations. Context resets across invalid or greater-than-60-second gaps. Features use only GPS and candidate geometry, never route labels.
 3. **Weak labels**: a monotonic dynamic-programming alignment maps observations to the ordered reference-route sequence. It combines point-to-segment distance with weak heading evidence when movement is observable. This is not independently verified ground truth. Observations whose target is absent from their candidate set are excluded from binary classifier fitting, but remain counted as Top-1 errors during evaluation.
-4. **Five-model comparison** (`scripts/train.py`): Logistic Regression, KNN, Decision Tree, Random Forest and Extra Trees. Five-fold `GroupKFold` groups by trip ID. The selected model maximizes mean observation-level Top-1 accuracy on training-only folds. Student-test metrics are reported separately.
-5. **Classifier tuning** (`scripts/tune.py`): Optuna TPE tunes the selected classifier using training trips only. The tuned model is saved as `pathsnap/models/final_model.joblib`.
-6. **Decoder tuning** (`scripts/tune_decoder.py`): creates out-of-fold training predictions and tunes HMM transition penalty, time-gap reset, movement feasibility and emission distance scale. It does not use student-test or evaluator labels.
+4. **Five-model comparison** (`scripts/train.py`): Logistic Regression, Decision Tree, Random Forest, Extra Trees and LightGBM. KNN has been removed. Five-fold `GroupKFold` groups by trip ID. The selected model maximizes mean observation-level Top-1 accuracy on training-only folds. Student-test metrics are reported separately.
+5. **Classifier tuning** (`scripts/tune.py`): Optuna TPE tunes the selected classifier using training trips only. LightGBM search includes learning rate, tree count, leaves, depth, child samples, row/column subsampling and regularization. The tuned model is saved as `pathsnap/models/final_model.joblib`.
+6. **Decoder tuning** (`scripts/tune_decoder.py`): creates out-of-fold training predictions and tunes directed shortest-path HMM beta, U-turn penalty, gap reset and emission distance scale. Dijkstra distances are cached per source node; disconnected candidate transitions are rejected, with a safe sequence restart if all transitions are unreachable. It does not use student-test or evaluator labels.
 7. **Evaluation and visualization**: `scripts/evaluate.py` compares classifier-only and HMM/Viterbi accuracy on student-test; `scripts/visualize.py` creates a layered map; `scripts/evaluate_final.py` performs one final evaluator scoring run after the model is frozen.
 
 ## Metrics
@@ -113,4 +114,4 @@ Open `http://localhost:8080/?api=http://LAPTOP1_LAN_IP:8000`. Both laptops must 
 
 ## Limitations
 
-Reference-route alignment is weak supervision, not independent ground truth. GPS noise, missing candidate roads, network fragmentation and the local projection approximation can affect performance. Do not claim an evaluator accuracy until the organiser's evaluator partition has actually been scored. Team members should be able to explain candidate generation, route alignment, all five classifiers, Optuna, HMM emissions/transitions and Viterbi decoding.
+Reference-route alignment is weak supervision, not independent ground truth. GPS noise, missing candidate roads, network fragmentation and the local projection approximation can affect performance. Do not claim an evaluator accuracy until the organiser's evaluator partition has actually been scored. Team members should be able to explain candidate generation, route alignment, all five classifiers (including LightGBM), candidate-context features, Optuna, directed shortest-path HMM emissions/transitions and Viterbi decoding.

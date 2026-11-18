@@ -1,4 +1,4 @@
-"""Compare the five required classifiers using trip-grouped observation Top-1 CV."""
+"""Compare classifiers (including LightGBM) using trip-grouped Top-1 CV."""
 from pathlib import Path
 import os, sys, json, time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,19 +10,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
+from pathsnap.modeling import make_models
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, log_loss
 from pathsnap.core import trip_features, FEATURES, viterbi
 
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results"; MOD=ROOT/"pathsnap"/"models"; VIS=ROOT/"pathsnap"/"visuals"
 for p in (OUT,MOD,VIS): p.mkdir(parents=True,exist_ok=True)
-SEED=42; K=8; CANDIDATE_POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"))
+SEED=42; K=8; CANDIDATE_POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
 
 
 def partition_path(name):
@@ -37,7 +32,7 @@ def collect(name):
     for folder in folders:
         try:
             track,nodes,arcs,route,net,X,y,cids,dists,target=trip_features(
-                folder,k=K,candidate_pool=CANDIDATE_POOL)
+                folder,k=K,candidate_pool=CANDIDATE_POOL,radius_m=RADIUS_M)
             if y is None: continue
             cand=cids.reshape(len(track),K)
             hit=np.any(cand==target[:,None],axis=1)
@@ -56,16 +51,6 @@ def collect(name):
             print("WARN",name,folder.name,repr(exc),flush=True)
     if not rows: raise RuntimeError(f"No usable trips in {base}")
     return pd.concat(rows,ignore_index=True),np.concatenate(targets),np.asarray(groups),trips,ids
-
-
-def make_models():
-    return {
-      "Logistic Regression":make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),LogisticRegression(max_iter=1000,class_weight="balanced",C=1.0,random_state=SEED)),
-      "K-Nearest Neighbours":make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),KNeighborsClassifier(n_neighbors=7,weights="distance")),
-      "Decision Tree":make_pipeline(SimpleImputer(strategy="median"),DecisionTreeClassifier(max_depth=12,min_samples_leaf=4,class_weight="balanced",random_state=SEED)),
-      "Random Forest":make_pipeline(SimpleImputer(strategy="median"),RandomForestClassifier(n_estimators=200,max_depth=16,min_samples_leaf=3,class_weight="balanced_subsample",n_jobs=-1,random_state=SEED)),
-      "Extra Trees":make_pipeline(SimpleImputer(strategy="median"),ExtraTreesClassifier(n_estimators=200,max_depth=18,min_samples_leaf=3,class_weight="balanced",n_jobs=-1,random_state=SEED)),
-    }
 
 
 def candidate_prob(model,X):
@@ -124,7 +109,7 @@ results=pd.DataFrame(rows).sort_values(["cv_top1_accuracy_mean","cv_top1_accurac
 results.to_csv(OUT/"model_comparison.csv",index=False)
 best=results.iloc[0].to_dict()
 (MOD/"model_metadata.json").write_text(json.dumps({
- "schema_version":2,"features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,
+ "schema_version":3,"features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,"candidate_radius_m":RADIUS_M,
  "selected_classifier":best["model"],
  "observations_per_trip":"full resolution","random_seed":SEED,
  "cv":"5-fold GroupKFold grouped by trip ID",
@@ -136,5 +121,5 @@ best=results.iloc[0].to_dict()
  "selected_model":best["model"],"cv_top1_accuracy_mean":best["cv_top1_accuracy_mean"],
  "cv_top1_accuracy_std":best["cv_top1_accuracy_std"],"candidate_pool":CANDIDATE_POOL,
  "k_candidates":K,"features":FEATURES,"training_trips":len(train_ids),
- "student_test_used_for_selection":False,"schema_version":2},indent=2))
+ "student_test_used_for_selection":False,"candidate_radius_m":RADIUS_M,"schema_version":3},indent=2))
 print("Selected model:",best["model"],flush=True)

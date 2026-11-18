@@ -33,23 +33,23 @@ for metric,title,filename in [
 
 metadata=read_model_metadata(ROOT/"pathsnap"/"models")
 model=validate_estimator(joblib.load(ROOT/"pathsnap"/"models"/"final_model.joblib"),metadata)
-k=int(metadata["k_candidates"])
+k=int(metadata["k_candidates"]); radius_m=float(metadata["candidate_radius_m"]); candidate_pool=int(metadata["candidate_pool"])
 base=partition_path("student_test")
 folders=[p for p in sorted(base.iterdir()) if p.is_dir() and (p/f"{p.name}.track").is_file()]
 if not folders: raise RuntimeError("No student_test trips found")
 folder=folders[0]
 track,nodes,arcs,route=read_trip(folder,include_route=True); net=make_network(nodes,arcs)
 decoder=read_decoder_metadata(ROOT/"pathsnap"/"models",metadata).get("best_params",{})
-X,_,cids,dists,_=candidate_rows(track,net,route=None,k=k,candidate_pool=int(metadata.get("candidate_pool",64)))
+X,_,cids,dists,_=candidate_rows(track,net,route=None,k=k,radius_m=radius_m,candidate_pool=candidate_pool)
 probs=model.predict_proba(X)[:,1]; scores=probs.reshape(len(track),k); scores=scores/(scores.sum(axis=1,keepdims=True)+1e-9)
 time_gaps=np.r_[0.0,np.diff(track.timestamp.to_numpy(dtype=float))]
 arc_lengths=np.zeros(len(arcs),dtype=float);arc_lengths[net["ids"]]=net["lengths"]
 fractions=X["projection_fraction"].to_numpy(dtype=float)
 displacement=X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track),k)[:,0]
 pred=viterbi(cids,dists,scores.ravel(),arcs,k=k,time_gaps=time_gaps,
-    transition_penalty=decoder.get("transition_penalty",3.0),gap_reset_s=decoder.get("gap_reset_s",5.0),
+    gap_reset_s=decoder.get("gap_reset_s",60.0),
     projection_fractions=fractions,arc_lengths=arc_lengths,gps_displacements=displacement,
-    speed_weight=decoder.get("speed_weight",0.015),max_speed_mps=decoder.get("max_speed_mps",55.0),
+    beta=decoder.get("beta",100.0),uturn_penalty=decoder.get("uturn_penalty",10.0),
     distance_scale_m=decoder.get("distance_scale_m",80.0))
 center=[float(track.lat.mean()),float(track.lon.mean())]
 m=folium.Map(location=center,zoom_start=14,control_scale=True)

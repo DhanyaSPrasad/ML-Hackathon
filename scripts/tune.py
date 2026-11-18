@@ -5,19 +5,14 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np, pandas as pd, joblib, optuna
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier
+from pathsnap.modeling import build_model
 from pathsnap.core import trip_features, FEATURES
 from pathsnap.artifacts import read_model_metadata
 
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results"; MOD=ROOT/"pathsnap"/"models"
 OUT.mkdir(parents=True,exist_ok=True); MOD.mkdir(parents=True,exist_ok=True)
-SEED=42; K=8; POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"))
+SEED=42; K=8; POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
 N_TRIALS=int(os.environ.get("PATHSNAP_TUNE_TRIALS","60"))
 
 
@@ -31,7 +26,7 @@ def collect(name):
     xs=[];ys=[];groups=[];trips=[]
     folders=[p for p in sorted(partition_path(name).iterdir()) if p.is_dir() and (p/f"{p.name}.track").is_file()]
     for folder in folders:
-        track,nodes,arcs,route,net,X,y,cids,dists,target=trip_features(folder,k=K,candidate_pool=POOL)
+        track,nodes,arcs,route,net,X,y,cids,dists,target=trip_features(folder,k=K,candidate_pool=POOL,radius_m=RADIUS_M)
         cand=cids.reshape(len(track),K); hit=np.any(cand==target[:,None],axis=1)
         keep=np.repeat(hit,K)
         if keep.any():
@@ -43,34 +38,7 @@ def collect(name):
 
 
 def build(trial,kind):
-    if kind=="Logistic Regression":
-        c=trial.suggest_float("C",1e-3,100,log=True)
-        return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
-            LogisticRegression(C=c,max_iter=1500,class_weight="balanced",random_state=SEED))
-    if kind=="K-Nearest Neighbours":
-        k=trial.suggest_int("n_neighbors",3,35,step=2)
-        weights=trial.suggest_categorical("weights",["uniform","distance"])
-        p=trial.suggest_categorical("p",[1,2])
-        return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
-            KNeighborsClassifier(n_neighbors=k,weights=weights,p=p,n_jobs=-1))
-    if kind=="Decision Tree":
-        return make_pipeline(SimpleImputer(strategy="median"),DecisionTreeClassifier(
-            max_depth=trial.suggest_int("max_depth",4,40),
-            min_samples_split=trial.suggest_int("min_samples_split",2,20),
-            min_samples_leaf=trial.suggest_int("min_samples_leaf",1,12),
-            criterion=trial.suggest_categorical("criterion",["gini","entropy","log_loss"]),
-            class_weight="balanced",random_state=SEED))
-    common=dict(n_estimators=trial.suggest_int("n_estimators",120,500,step=20),
-        max_depth=trial.suggest_int("max_depth",6,40),
-        min_samples_split=trial.suggest_int("min_samples_split",2,20),
-        min_samples_leaf=trial.suggest_int("min_samples_leaf",1,10),
-        max_features=trial.suggest_categorical("max_features",["sqrt","log2",0.5,0.7,0.9,1.0]),
-        n_jobs=-1,random_state=SEED)
-    if kind=="Random Forest":
-        common["class_weight"]=trial.suggest_categorical("class_weight",["balanced","balanced_subsample",None])
-        return make_pipeline(SimpleImputer(strategy="median"),RandomForestClassifier(**common))
-    return make_pipeline(SimpleImputer(strategy="median"),ExtraTreesClassifier(
-        **common,class_weight=trial.suggest_categorical("class_weight",["balanced",None])))
+    return build_model(kind, trial=trial)
 
 
 def score(model,trips,held):
@@ -86,7 +54,7 @@ def score(model,trips,held):
 X,y,groups,train_trips=collect("train")
 model_metadata=read_model_metadata(MOD)
 selection=json.loads((MOD/"model_selection.json").read_text())
-if int(model_metadata["k_candidates"]) != K or int(model_metadata["candidate_pool"]) != POOL:
+if int(model_metadata["k_candidates"]) != K or int(model_metadata["candidate_pool"]) != POOL or float(model_metadata.get("candidate_radius_m", -1)) != RADIUS_M:
     raise ValueError("Candidate settings differ from train.py metadata. Re-run train.py or use the same PATHSNAP_CANDIDATE_POOL.")
 if selection.get("features") != FEATURES or selection.get("selected_model") != model_metadata.get("selected_classifier"):
     raise ValueError("model_selection.json is stale; rerun scripts/train.py")
@@ -104,11 +72,11 @@ def objective(trial):
 study=optuna.create_study(direction="maximize",sampler=optuna.samplers.TPESampler(seed=SEED))
 study.optimize(objective,n_trials=N_TRIALS,show_progress_bar=False)
 best_trial=optuna.trial.FixedTrial(study.best_params)
-model=build(best_trial,kind)
+model=build_model(kind,params=study.best_params)
 start=time.perf_counter();model.fit(X,y);fit_s=time.perf_counter()-start
 joblib.dump(model,MOD/"final_model.joblib")
 (MOD/"model_metadata.json").write_text(json.dumps({
- "schema_version":2,"features":FEATURES,"k_candidates":K,"candidate_pool":POOL,
+ "schema_version":3,"features":FEATURES,"k_candidates":K,"candidate_pool":POOL,"candidate_radius_m":RADIUS_M,
  "observations_per_trip":"full resolution","random_seed":SEED,
  "cv":"5-fold GroupKFold grouped by trip ID",
  "selected_classifier":kind,"label_definition":"Monotonic dynamic-programming alignment to ordered reference route; weak geometric supervision.",
@@ -136,7 +104,7 @@ summary={"selected_classifier":kind,"sampler":"Optuna TPE",
  "objective":"5-fold GroupKFold observation-level Top-1 accuracy on training trips",
  "trials":N_TRIALS,"best_params":study.best_params,"best_cv_top1_accuracy":study.best_value,
  "training_trip_count":len(set(groups)),"training_candidate_rows":len(X),
- "candidate_pool":POOL,"k_candidates":K,"features":FEATURES,"schema_version":2,
+ "candidate_pool":POOL,"candidate_radius_m":RADIUS_M,"k_candidates":K,"features":FEATURES,"schema_version":3,
  "final_fit_seconds":fit_s,"evaluator_partition_used":False}
 (OUT/"bayesian_best.json").write_text(json.dumps(summary,indent=2))
 print(json.dumps(summary,indent=2))

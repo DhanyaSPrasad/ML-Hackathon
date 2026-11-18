@@ -12,16 +12,17 @@ Local metric projection + KD-tree broad phase
   - nearest-midpoint fallback
           |
           v
-Exact point-to-segment ranking (8 candidates)
+Exact point-to-segment ranking (50 m default, 8 candidates)
           |
           v
-Motion + geometry + circular-direction features
+Geometry + motion + previous/next candidate-context features
           |
           v
 Ordered reference-route DP alignment (training only)
           |
           v
-Five required classifiers
+Five classifiers: Logistic Regression, Decision Tree, Random Forest,
+  Extra Trees and LightGBM (KNN removed)
   - 5-fold GroupKFold by trip
   - observation-level Top-1 model selection
           |
@@ -50,11 +51,11 @@ All temporal features are calculated on the original full-resolution GPS sequenc
 
 ## Model selection and tuning
 
-All five required classifiers are compared with 5-fold GroupKFold, grouping by trip ID. The primary selection metric is observation-level Top-1 accuracy, not flattened candidate-row Macro F1. Optuna TPE tunes the classifier selected using training-only cross-validation. Student-test results are reported separately and are not used to select or tune the model. The evaluator partition is never read by training or tuning.
+Logistic Regression, Decision Tree, Random Forest, Extra Trees and LightGBM are compared with 5-fold GroupKFold, grouping by trip ID. The primary selection metric is observation-level Top-1 accuracy, not flattened candidate-row Macro F1. Optuna TPE tunes the classifier selected using training-only cross-validation. Student-test results are reported separately and are not used to select or tune the model. The evaluator partition is never read by training or tuning.
 
 ## HMM / Viterbi
 
-Classifier scores form the emission evidence. The decoder uses directed-arc connectivity, GPS time gaps, GPS-to-segment distance, projected position along each segment, segment lengths and observed displacement. A long time gap relaxes continuity constraints. Decoder parameters should be selected on training-only out-of-fold predictions; continuity is a diagnostic and must not replace Top-1 accuracy as the primary objective.
+Classifier scores form the emission evidence. The decoder uses directed Dijkstra shortest-path distances between candidate arcs, GPS time gaps, projected position along each segment and observed displacement. Transition scores penalize disagreement between road-network distance and GPS displacement, with a reverse-arc U-turn penalty. Dijkstra results are cached per source node. Gaps over the tuned reset threshold restart the sequence; if all directed transitions are unreachable, the decoder safely restarts at that observation. Decoder parameters should be selected on training-only out-of-fold predictions; continuity is a diagnostic and must not replace Top-1 accuracy as the primary objective.
 
 ## Prediction boundary
 

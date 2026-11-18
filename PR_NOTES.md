@@ -1,6 +1,6 @@
 ﻿# PathSnap experiment notes
 
-This project compares five candidate classifiers, tunes Random Forest on trip-grouped training folds, and evaluates HMM/Viterbi decoding on the student-test partition.
+This project compares Logistic Regression, Decision Tree, Random Forest, Extra Trees and LightGBM (KNN removed), tunes the selected classifier on trip-grouped training folds, and evaluates a directed shortest-path HMM/Viterbi decoder on the student-test partition.
 
 ## Workflow
 
@@ -9,6 +9,7 @@ Run from the repository root:
 ```powershell
 python scripts/preprocess.py
 python scripts/explore.py
+python scripts/candidate_sweep.py
 python scripts/train.py
 python scripts/tune.py
 python scripts/evaluate.py
