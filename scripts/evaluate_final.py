@@ -22,6 +22,7 @@ OUT = ROOT / "pathsnap" / "results"
 metadata = read_model_metadata(MODELS)
 MODEL = validate_estimator(joblib.load(MODELS / "final_model.joblib"), metadata)
 k = int(metadata.get("k_candidates", 8))
+radius_m = float(metadata.get("candidate_radius_m", 50.0))
 decoder = read_decoder_metadata(MODELS, metadata).get("best_params", {})
 
 
@@ -37,7 +38,7 @@ def infer_without_labels(folder):
     network = make_network(nodes, arcs)
     X, _, candidate_ids, distances, _ = candidate_rows(
         track, network, route=None, k=k,
-        candidate_pool=int(metadata.get("candidate_pool", 64)))
+        candidate_pool=int(metadata.get("candidate_pool", 64)), radius_m=radius_m)
     probabilities = MODEL.predict_proba(X)[:, 1]
     scores = probabilities.reshape(len(track), k)
     scores = scores / (scores.sum(axis=1, keepdims=True) + 1e-9)
