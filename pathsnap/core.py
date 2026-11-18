@@ -133,7 +133,7 @@ def _sequence_route_targets(track, net, route, gps_xy, gps_heading):
     n_obs, n_route = emission.shape
     if n_route == 1:
         return np.full(n_obs, route_ids[0], dtype=int)
-    skip_cost = 2.0
+    skip_cost = 0.25
     dp = emission[0].astype(float)
     back = np.zeros((n_obs, n_route), dtype=np.int32)
     indices = np.arange(n_route, dtype=float)
