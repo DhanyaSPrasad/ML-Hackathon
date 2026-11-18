@@ -58,7 +58,14 @@ def predict(trip_id:str):
     candidate_matrix=candidate_ids.reshape(len(track),k)
     classifier_predicted=candidate_matrix[np.arange(len(track)),np.argmax(scores,axis=1)]
     time_gaps=np.r_[0.0,np.diff(track.timestamp.to_numpy(dtype=float))]
-    predicted=viterbi(candidate_ids,distances,scores.ravel(),arcs,k=k,time_gaps=time_gaps,gap_reset_s=5.0)
+    arc_lengths=np.zeros(len(arcs),dtype=float)
+    arc_lengths[net["ids"]]=net["lengths"]
+    projection_fractions=X["projection_fraction"].to_numpy(dtype=float)
+    gps_displacements=X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track),k)[:,0]
+    predicted=viterbi(candidate_ids,distances,scores.ravel(),arcs,k=k,time_gaps=time_gaps,
+                      gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S","5.0")),
+                      projection_fractions=projection_fractions,arc_lengths=arc_lengths,
+                      gps_displacements=gps_displacements)
     edges=arcs[["from_node","to_node"]].to_numpy(dtype=int)
     good=total=0
     for a,b in zip(predicted[:-1],predicted[1:]):
