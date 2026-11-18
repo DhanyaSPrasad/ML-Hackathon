@@ -301,7 +301,7 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
                         excess = max(0.0, implied - observed - allowance)
                         transition -= speed_weight * abs(implied - observed)
                         transition -= 0.08 * excess
-                value = dp[t-1, q] + transition
+                value = dp[q] + transition
                 if value > best_value:
                     best_value, best_prev = value, q
             dp_current = best_value + np.log(max(prob[t, j], 1e-9)) - dist[t, j] / max(float(distance_scale_m), 1e-6)
