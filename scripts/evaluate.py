@@ -5,10 +5,12 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np,pandas as pd,joblib
 from sklearn.metrics import accuracy_score
 from pathsnap.core import trip_features,viterbi
+from pathsnap.artifacts import read_model_metadata, validate_estimator
 
 ROOT=Path(__file__).resolve().parents[1];DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results";MODEL_DIR=ROOT/"pathsnap"/"models";OUT.mkdir(parents=True,exist_ok=True)
-K=8;POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"))
+METADATA=read_model_metadata(MODEL_DIR)
+K=int(METADATA["k_candidates"]);POOL=int(METADATA["candidate_pool"])
 try:
     DECODER=json.loads((MODEL_DIR/"decoder_metadata.json").read_text()).get("best_params",{})
 except (FileNotFoundError,ValueError):
@@ -27,7 +29,13 @@ def continuity(sequence,arcs):
     return good/max(total,1)
 
 folders=[p for p in sorted(partition_path("student_test").iterdir()) if p.is_dir() and (p/f"{p.name}.track").is_file()]
-models=[(p.stem.replace("_"," ").title(),joblib.load(p)) for p in sorted(MODEL_DIR.glob("*.joblib"))]
+models=[]
+for path in sorted(MODEL_DIR.glob("*.joblib")):
+    try:
+        estimator=validate_estimator(joblib.load(path),METADATA)
+        models.append((path.stem.replace("_"," ").title(),estimator))
+    except (ValueError, OSError) as exc:
+        print(f"Skipping incompatible model artifact {path.name}: {exc}")
 if not folders:raise RuntimeError("No student_test trips found")
 if not models:raise RuntimeError("No saved models found")
 rows=[]
