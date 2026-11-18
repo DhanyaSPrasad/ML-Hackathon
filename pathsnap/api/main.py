@@ -1,4 +1,4 @@
-"""Prediction-only API. Reference .route files are never read by this service."""
+"""Prediction API; reference routes are excluded from prediction and used only for post-inference aggregate scoring."""
 from pathlib import Path
 import sys, os, logging
 ROOT=Path(__file__).resolve().parents[2]
@@ -114,6 +114,7 @@ def predict(trip_id:str):
             "predicted_arc_ids":predicted.tolist(),"predicted_segments":route_xy,
             "gps":track[["lon","lat"]].values.tolist(),
             "route_continuity":good/max(total,1),
+            "accuracy_internal":(metrics["decoded_top1_accuracy"] if metrics else None),
             "evaluation_metrics":metrics}
     log.info("Prediction complete trip_id=%s observations=%d continuity=%.4f",trip_id,len(track),result["route_continuity"])
     return result
