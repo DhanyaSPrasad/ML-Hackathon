@@ -7,7 +7,7 @@ from scipy.spatial import cKDTree
 # Keep this schema in sync with model_metadata.json. Angles are represented
 # both as differences and sine/cosine pairs to avoid the 0/360 discontinuity.
 FEATURES = [
-    "distance_m", "bearing_diff", "road_length_m", "road_bearing",
+    "distance_m", "bearing_diff", "road_length_m",
     "gps_speed_mps", "time_gap_s", "heading_change", "candidate_rank",
     "projection_fraction", "segment_alignment", "gps_displacement_m",
     "road_bearing_sin", "road_bearing_cos", "gps_heading_sin",
@@ -178,6 +178,10 @@ def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=Non
     _, midpoint_idx = net["tree"].query(gps_xy, k=pool)
     if pool == 1:
         midpoint_idx = midpoint_idx[:, None]
+    # Any segment within radius_m has its midpoint within radius_m plus
+    # half the segment length. Use this bound for a complete in-radius shortlist.
+    max_half_length = float(np.max(net["lengths"]) / 2.0) if len(net["lengths"]) else 0.0
+    spatial_radius = max(0.0, float(radius_m)) + max_half_length
 
     gaps = np.ones(n, dtype=float)
     speed = np.zeros(n, dtype=float)
@@ -195,7 +199,9 @@ def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=Non
 
     rows, candidate_ids, candidate_dists, candidate_fracs = [], [], [], []
     for i in range(n):
-        selected = np.asarray(midpoint_idx[i], dtype=int).reshape(-1)
+        spatial = np.asarray(net["tree"].query_ball_point(gps_xy[i], r=spatial_radius), dtype=int)
+        fallback = np.asarray(midpoint_idx[i], dtype=int).reshape(-1)
+        selected = np.unique(np.concatenate((spatial, fallback)))
         distances, fractions = _point_segment_projection(
             gps_xy[i:i+1], net["a_xy"][selected], net["b_xy"][selected])
         d, f = distances[0], fractions[0]
@@ -206,7 +212,7 @@ def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=Non
             road_bearing = float(net["bearings"][j])
             delta = float(angular_difference(road_bearing, gps_heading[i]))
             rows.append([
-                float(dist), delta, float(net["lengths"][j]), road_bearing,
+                float(dist), delta, float(net["lengths"][j]),
                 float(speed[i]), float(gaps[i]), float(heading_change[i]),
                 float(rank), float(frac), float(np.cos(np.radians(delta))),
                 float(displacement[i]), float(np.sin(np.radians(road_bearing))),
