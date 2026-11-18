@@ -94,6 +94,10 @@ X,y,groups,train_trips,train_ids=collect("train")
 print(f"Training rows: {len(X)} | trips: {len(train_ids)} | features: {len(FEATURES)}",flush=True)
 cv=GroupKFold(n_splits=min(5,len(np.unique(groups))))
 splits=list(cv.split(X,y,groups))
+try:
+    _,_,_,dev_trips,_=collect("student_test")
+except FileNotFoundError:
+    dev_trips=[]
 rows=[]
 for name in make_models():
     print("Evaluating",name,flush=True)
@@ -101,11 +105,8 @@ for name in make_models():
     model=make_models()[name]; fit=time.perf_counter(); model.fit(X,y); fit_s=time.perf_counter()-fit
     row={"model":name,"cv_top1_accuracy_mean":mean,"cv_top1_accuracy_std":std,
          "cv_seconds":elapsed,"training_seconds":fit_s,"features":len(FEATURES)}
-    try:
-        _,_,_,dev_trips,_=collect("student_test")
+    if dev_trips:
         row["student_test_top1_accuracy"],_,row["student_test_candidate_miss_rate"]=evaluate_top1(model,dev_trips)
-    except FileNotFoundError:
-        pass
     rows.append(row)
     artifact=MOD/(name.lower().replace(" ","_")+".joblib")
     joblib.dump(model,artifact)
