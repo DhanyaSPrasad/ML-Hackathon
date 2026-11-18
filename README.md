@@ -32,7 +32,7 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Python 3.10+ is supported. Use the same environment for all scripts. For a quick code smoke test, set `$env:PATHSNAP_OBS_PER_TRIP="12"` before running the training/tuning scripts; set `$env:PATHSNAP_TUNE_TRIALS="2"` for a quick tuning check. Remove both overrides for the full experiment (defaults: 120 observations per trip and 30 tuning trials).
+Python 3.10+ is supported. Use the same environment for all scripts. For a quick tuning smoke test, set `$env:PATHSNAP_TUNE_TRIALS="2"` and `$env:PATHSNAP_DECODER_TRIALS="2"`. Remove these overrides for the full experiment (defaults: 60 classifier trials and 60 decoder trials). Training and inference always use the complete original GPS tracks.
 
 ## Reproducible experiment workflow
 
@@ -67,7 +67,7 @@ The classifier is a candidate scorer: each GPS observation has eight directed-ro
 
 Reference routes are used in offline training/development scripts and, for final evaluator requests, loaded only after prediction to calculate aggregate server-side metrics. They never enter the inference feature matrix or decoder. Distances use a trip-local equirectangular metric approximation, suitable for the small spatial extent of an individual trip.
 
-**Metric levels:** `train_accuracy` and `student_test_candidate_accuracy` classify flattened candidate rows. `student_top1_accuracy` selects one candidate per GPS observation and compares its arc ID with the weak reference target. These are different metrics. Training accuracy is a resubstitution metric; use trip-grouped CV and student-test results to assess generalisation. The TPE search optimizes trip-grouped observation-level Top-1. The decoder comparison reports classifier and decoded Top-1 accuracy; continuity may improve while pointwise accuracy falls.
+**Primary metric:** observation-level Top-1 accuracy selects one candidate per GPS observation and compares its arc ID with the weak reference target. Candidate-level binary metrics are secondary diagnostics. Use trip-grouped CV for model selection and student-test only as a separate development check. Both classifier and decoder TPE searches optimize observation-level Top-1 using training-only folds.
 
 ## Key outputs
 
@@ -75,6 +75,8 @@ Reference routes are used in offline training/development scripts and, for final
 |---|---|
 | Preprocessing audit | `pathsnap/results/preprocessing_audit.csv` |
 | Feature distributions | `pathsnap/results/feature_summary_by_trip.csv` |
+| Five-model comparison | `pathsnap/results/model_comparison.csv` |
+| Selected model and feature metadata | `pathsnap/models/model_selection.json`, `model_metadata.json` |
 | Five-model comparison | `pathsnap/results/model_comparison.csv` |
 | Confusion matrices | `pathsnap/visuals/confusion_*.png` |
 | Tree feature importance | `pathsnap/results/feature_importance_*.csv` |
