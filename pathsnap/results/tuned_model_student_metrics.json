@@ -1,0 +1,8 @@
+{
+  "candidate_level_accuracy":0.939375,
+  "candidate_level_macro_f1":0.8639461613,
+  "candidate_level_precision":0.725931677,
+  "candidate_level_recall":0.8032646048,
+  "candidate_level_log_loss":0.1972069021,
+  "observation_top1_accuracy":0.7733333333
+}

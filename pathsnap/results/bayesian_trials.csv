@@ -1,0 +1,4 @@
+trial,value,params
+0,0.8457062250887752,"{""n_estimators"": 27, ""max_depth"": 16, ""min_samples_leaf"": 5, ""max_features"": ""sqrt""}"
+1,0.8319428876520549,"{""n_estimators"": 23, ""max_depth"": 8, ""min_samples_leaf"": 6, ""max_features"": 0.8}"
+2,0.8433989474373944,"{""n_estimators"": 20, ""max_depth"": 16, ""min_samples_leaf"": 6, ""max_features"": ""sqrt""}"

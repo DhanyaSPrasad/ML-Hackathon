@@ -1,0 +1,8 @@
+{
+  "observations":120.0,
+  "candidate_top1_accuracy":0.7733333333,
+  "hmm_accuracy":0.7025,
+  "candidate_miss_rate":0.03,
+  "classifier_route_continuity":0.2478991597,
+  "hmm_route_continuity":0.4579831933
+}
