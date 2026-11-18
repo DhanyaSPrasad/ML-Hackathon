@@ -56,6 +56,34 @@ class MapMatchingCoreTests(unittest.TestCase):
         self.assertEqual(len(candidate_ids), 2)
         self.assertTrue(np.isfinite(X.to_numpy()).all())
 
+    def test_context_features_are_finite_and_schema_aligned(self):
+        nodes = pd.DataFrame({"lon": [0.0, 0.001, 0.002], "lat": [0.0, 0.0, 0.0]})
+        arcs = pd.DataFrame({"from_node": [0, 1], "to_node": [1, 2]})
+        track = pd.DataFrame({"lon": [0.0002, 0.0008, 0.0014],
+                              "lat": [0.0, 0.0, 0.0],
+                              "timestamp": [1.0, 2.0, 3.0]})
+        net = make_network(nodes, arcs)
+        X, _, ids, _, _ = candidate_rows(track, net, route=None, k=2, radius_m=50)
+        self.assertEqual(list(X.columns), list(FEATURES))
+        self.assertEqual(len(ids), len(track) * 2)
+        self.assertTrue(np.isfinite(X.to_numpy()).all())
+        self.assertIn("previous_candidate_m", X.columns)
+        self.assertIn("next_candidate_m", X.columns)
+
+    def test_viterbi_uses_directed_network_and_returns_one_state_per_fix(self):
+        arcs = pd.DataFrame({"from_node": [0, 1, 2], "to_node": [1, 2, 3]})
+        predicted = viterbi(
+            candidate_ids=np.array([0, 1, 1, 2]),
+            distances=np.array([1.0, 2.0, 1.0, 2.0]),
+            scores=np.array([0.8, 0.2, 0.8, 0.2]),
+            arcs=arcs, k=2, time_gaps=np.array([0.0, 1.0]),
+            projection_fractions=np.array([0.2, 0.5, 0.8, 0.2]),
+            arc_lengths=np.array([100.0, 100.0, 100.0]),
+            gps_displacements=np.array([0.0, 60.0]),
+        )
+        self.assertEqual(predicted.shape, (2,))
+        self.assertTrue(np.isin(predicted, [0, 1, 2]).all())
+
 
 if __name__ == "__main__":
     unittest.main()
