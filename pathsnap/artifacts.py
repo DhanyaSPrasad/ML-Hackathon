@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pathsnap.core import FEATURES
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def read_model_metadata(models_dir):
@@ -34,7 +34,8 @@ def validate_metadata(metadata):
         )
     k = int(metadata.get("k_candidates", 0))
     pool = int(metadata.get("candidate_pool", 0))
-    if k < 1 or pool < k:
+    radius = float(metadata.get("candidate_radius_m", 0))
+    if k < 1 or pool < k or radius <= 0:
         raise ValueError("Invalid candidate configuration in model_metadata.json")
     return metadata
 
