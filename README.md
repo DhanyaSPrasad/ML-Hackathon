@@ -115,4 +115,3 @@ Open `http://localhost:8080/?api=http://LAPTOP1_LAN_IP:8000`. Both laptops must 
 ## Academic integrity and limitations
 
 The route-constrained labels are approximate; the supplied reference route may itself have limitations. GPS gaps, candidate miss rate, disconnected road-network fragments and the local projection approximation affect performance. Do not fabricate results or report evaluator-test metrics from development runs. Team members should understand and be able to explain preprocessing, feature extraction, model comparison, TPE optimisation, emission/transition design and Viterbi decoding.
-
