@@ -59,7 +59,7 @@ After the model and decoder settings are finalized, run `python scripts/evaluate
 4. **Classifier Bayesian optimisation** (`scripts/tune.py`): Optuna TPE search for the classifier selected by training-only 5-fold trip-grouped observation-level Top-1 accuracy. Saves trial history, best configuration and tuned model.
 5. **Decoder Bayesian optimisation** (`scripts/tune_decoder.py`): generates out-of-fold predictions for training trips and tunes HMM transition penalty, gap reset, movement feasibility and emission distance scale. Student-test and evaluator labels are not used.
 6. **Sequential decoding** (`scripts/evaluate.py`): compares classifier-only predictions with movement-aware Viterbi decoding on student-test trips. Repeated observations on the same arc are valid transitions; a long timestamp gap relaxes continuity constraints.
-6. **Visualisation** (`scripts/visualize.py`): creates actual-result comparison plots and an interactive Folium map.
+7. **Visualisation** (`scripts/visualize.py`): creates actual-result comparison plots and an interactive Folium map.
 
 ## Feature and label definitions
 
