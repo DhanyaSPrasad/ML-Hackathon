@@ -5,12 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np,pandas as pd,optuna
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier
+from pathsnap.modeling import build_model
 from pathsnap.core import trip_features,viterbi,FEATURES
 from pathsnap.artifacts import read_model_metadata
 
@@ -27,20 +22,7 @@ def partition_path(name):
 
 
 def make_model(kind,p):
-    if kind=="Logistic Regression":
-        est=LogisticRegression(C=p["C"],max_iter=1500,class_weight="balanced",random_state=42)
-        return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),est)
-    if kind=="K-Nearest Neighbours":
-        est=KNeighborsClassifier(n_neighbors=p["n_neighbors"],weights=p["weights"],p=p["p"],n_jobs=-1)
-        return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),est)
-    if kind=="Decision Tree":
-        est=DecisionTreeClassifier(max_depth=p["max_depth"],min_samples_split=p["min_samples_split"],
-          min_samples_leaf=p["min_samples_leaf"],criterion=p["criterion"],class_weight="balanced",random_state=42)
-        return make_pipeline(SimpleImputer(strategy="median"),est)
-    common={k:p[k] for k in ("n_estimators","max_depth","min_samples_split","min_samples_leaf","max_features")}
-    common.update(n_jobs=-1,random_state=42,class_weight=p.get("class_weight"))
-    est=RandomForestClassifier(**common) if kind=="Random Forest" else ExtraTreesClassifier(**common)
-    return make_pipeline(SimpleImputer(strategy="median"),est)
+    return build_model(kind, params=p)
 
 
 def collect():
@@ -88,10 +70,9 @@ for fit_idx,val_idx in cv.split(X,y,groups):
             oof[t["id"]]=model.predict_proba(t["X"])[:,1].reshape(len(t["track"]),K)
 
 def objective(trial):
-    transition=trial.suggest_float("transition_penalty",0.1,10.0)
-    gap=trial.suggest_float("gap_reset_s",2.0,30.0)
-    speed=trial.suggest_float("speed_weight",0.0,0.08)
-    max_speed=trial.suggest_float("max_speed_mps",25.0,60.0)
+    beta=trial.suggest_float("beta",25.0,250.0,log=True)
+    gap=trial.suggest_float("gap_reset_s",10.0,90.0)
+    uturn=trial.suggest_float("uturn_penalty",0.0,20.0)
     scale=trial.suggest_float("distance_scale_m",20.0,250.0,log=True)
     correct=total=0
     for t in trips:
@@ -99,8 +80,8 @@ def objective(trial):
         n=len(t["track"]);p=oof[t["id"]]
         p=p/(p.sum(axis=1,keepdims=True)+1e-9)
         decoded=viterbi(t["cids"],t["dists"],p.ravel(),t["arcs"],k=K,
-          transition_penalty=transition,**movement_inputs(t),gap_reset_s=gap,
-          speed_weight=speed,max_speed_mps=max_speed,distance_scale_m=scale)
+          **movement_inputs(t), gap_reset_s=gap, beta=beta,
+          uturn_penalty=uturn, distance_scale_m=scale)
         valid=t["target"]>=0
         correct+=int(np.sum((decoded==t["target"])&valid));total+=int(valid.sum())
     return correct/max(total,1)
