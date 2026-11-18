@@ -45,6 +45,8 @@ def main():
             raise ValueError(f"{name} candidate count differs from model_metadata.json")
         if int(artifact.get("candidate_pool", 0)) != int(metadata["candidate_pool"]):
             raise ValueError(f"{name} candidate pool differs from model_metadata.json")
+        if float(artifact.get("candidate_radius_m", 0)) != float(metadata["candidate_radius_m"]):
+            raise ValueError(f"{name} candidate radius differs from model_metadata.json")
 
     model = joblib.load(model_path)
     validate_estimator(model, metadata)
