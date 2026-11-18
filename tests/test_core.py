@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 import pandas as pd
-from pathsnap.core import make_network, candidate_rows, viterbi
+from pathsnap.core import make_network, candidate_rows, viterbi, FEATURES
+from pathsnap.artifacts import validate_metadata
 
 
 class MapMatchingCoreTests(unittest.TestCase):
@@ -32,6 +33,17 @@ class MapMatchingCoreTests(unittest.TestCase):
             transition_penalty=5.0,
         )
         self.assertEqual(predicted.tolist(), [0, 0])
+
+    def test_current_artifact_metadata_is_accepted(self):
+        metadata = {"features": list(FEATURES), "observations_per_trip": "full resolution",
+                    "k_candidates": 8, "candidate_pool": 64}
+        self.assertIs(validate_metadata(metadata), metadata)
+
+    def test_stale_feature_metadata_is_rejected(self):
+        metadata = {"features": ["old_feature"], "observations_per_trip": 120,
+                    "k_candidates": 8, "candidate_pool": 64}
+        with self.assertRaisesRegex(ValueError, "feature schema is stale"):
+            validate_metadata(metadata)
 
     def test_feature_rows_match_declared_schema(self):
         nodes = pd.DataFrame({"lon": [0.0, 0.001], "lat": [0.0, 0.0]})
