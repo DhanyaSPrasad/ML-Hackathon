@@ -31,11 +31,13 @@ for folder in folders:
                 "candidate_miss_rate":float(miss[valid].mean()) if valid.any() else np.nan})
     print("Completed",folder.name,flush=True)
 df=pd.DataFrame(rows)
-summary=df.groupby(["radius_m","k_candidates"],as_index=False).apply(
-    lambda g: pd.Series({"trips":g.trip_id.nunique(),"observations":g.observations.sum(),
-      "mean_trip_candidate_miss_rate":g.candidate_miss_rate.mean(),
-      "pooled_candidate_miss_rate":np.average(g.candidate_miss_rate,weights=g.observations)}),
-    include_groups=False).reset_index(drop=True)
+df["misses_estimate"]=df["candidate_miss_rate"]*df["observations"]
+summary=df.groupby(["radius_m","k_candidates"]).agg(
+    trips=("trip_id","nunique"),observations=("observations","sum"),
+    mean_trip_candidate_miss_rate=("candidate_miss_rate","mean"),
+    misses_estimate=("misses_estimate","sum")).reset_index()
+summary["pooled_candidate_miss_rate"]=summary["misses_estimate"]/summary["observations"]
+summary=summary.drop(columns=["misses_estimate"])
 df.to_csv(OUT/"candidate_sweep_by_trip.csv",index=False)
 summary.to_csv(OUT/"candidate_sweep_summary.csv",index=False)
 print(summary.sort_values("pooled_candidate_miss_rate").to_string(index=False))
