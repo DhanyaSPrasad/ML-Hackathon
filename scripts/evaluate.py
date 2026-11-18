@@ -23,7 +23,7 @@ def continuity(sequence,arcs):
     edges=arcs[["from_node","to_node"]].to_numpy(dtype=int);good=total=0
     for a,b in zip(sequence[:-1],sequence[1:]):
         if 0<=a<len(edges) and 0<=b<len(edges):
-            total+=1;good+=int(edges[a,1]==edges[b,0])
+            total+=1;good+=int(a==b or edges[a,1]==edges[b,0])
     return good/max(total,1)
 
 folders=[p for p in sorted(partition_path("student_test").iterdir()) if p.is_dir() and (p/f"{p.name}.track").is_file()]
