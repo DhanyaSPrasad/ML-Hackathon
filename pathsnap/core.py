@@ -317,7 +317,7 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
 
     adjacency = {}
     for aid, (u, v) in enumerate(edge):
-        if aid < len(lengths) and lengths[aid] >= 0:
+        if aid < len(lengths) and lengths[aid] > 0:
             adjacency.setdefault(int(u), []).append((int(v), float(lengths[aid])))
     shortest_cache = {}
 
