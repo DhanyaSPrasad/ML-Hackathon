@@ -5,16 +5,16 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np,pandas as pd,joblib
 from sklearn.metrics import accuracy_score
 from pathsnap.core import trip_features,viterbi
-from pathsnap.artifacts import read_model_metadata, validate_estimator
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 
 ROOT=Path(__file__).resolve().parents[1];DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results";MODEL_DIR=ROOT/"pathsnap"/"models";OUT.mkdir(parents=True,exist_ok=True)
 METADATA=read_model_metadata(MODEL_DIR)
 K=int(METADATA["k_candidates"]);POOL=int(METADATA["candidate_pool"])
 try:
-    DECODER=json.loads((MODEL_DIR/"decoder_metadata.json").read_text()).get("best_params",{})
-except (FileNotFoundError,ValueError):
-    DECODER={}
+    DECODER=read_decoder_metadata(MODEL_DIR,METADATA).get("best_params",{})
+except (FileNotFoundError,ValueError) as exc:
+    raise RuntimeError(f"Run scripts/tune_decoder.py with the current model before evaluation: {exc}")
 
 def partition_path(name):
     for p in (DATA/name,DATA/"train"/name):
