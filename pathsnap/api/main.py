@@ -9,6 +9,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathsnap.core import read_trip, make_network, candidate_rows, viterbi, FEATURES
+from pathsnap.artifacts import read_model_metadata, validate_estimator
 
 logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(message)s")
 log=logging.getLogger("pathsnap")
@@ -16,19 +17,23 @@ app=FastAPI(title="PathSnap API",version="2.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 DATA=ROOT/"Student folder"
 PARTITION=os.environ.get("PATHSNAP_TRIP_PARTITION","student_test")
-MODEL_PATH=ROOT/"pathsnap"/"models"/"final_model.joblib"
-model=joblib.load(MODEL_PATH) if MODEL_PATH.exists() else None
-MODEL_K=8
+MODEL_DIR=ROOT/"pathsnap"/"models"
+MODEL_PATH=MODEL_DIR/"final_model.joblib"
+MODEL_METADATA=None
+model=None
+try:
+    MODEL_METADATA=read_model_metadata(MODEL_DIR)
+    if MODEL_PATH.exists():
+        model=validate_estimator(joblib.load(MODEL_PATH),MODEL_METADATA)
+except (FileNotFoundError, ValueError) as exc:
+    logging.warning("Model artifact is unavailable or stale: %s",exc)
+MODEL_K=int(MODEL_METADATA["k_candidates"]) if MODEL_METADATA else 8
+CANDIDATE_POOL=int(MODEL_METADATA["candidate_pool"]) if MODEL_METADATA else 64
 DECODER_PATH=ROOT/"pathsnap"/"models"/"decoder_metadata.json"
 try:
     DECODER_PARAMS=json.loads(DECODER_PATH.read_text()).get("best_params",{})
 except (FileNotFoundError,ValueError):
     DECODER_PARAMS={}
-# Fail clearly if a repository still contains an artifact from the previous
-# feature schema; run train.py followed by tune.py to rebuild it.
-if model is not None and getattr(model, "n_features_in_", len(FEATURES)) != len(FEATURES):
-    logging.warning("Model artifact feature count does not match current schema; retraining is required")
-    model = None
 
 def partition_dir():
     for p in (DATA/PARTITION, DATA/"train"/PARTITION):
@@ -56,7 +61,7 @@ def predict(trip_id:str):
     # Critical leakage guard: do not read the reference route in the prediction path.
     track,nodes,arcs,_=read_trip(folder,include_route=False)
     net=make_network(nodes,arcs)
-    X,_,candidate_ids,distances,_=candidate_rows(track,net,route=None,k=MODEL_K)
+    X,_,candidate_ids,distances,_=candidate_rows(track,net,route=None,k=MODEL_K,candidate_pool=CANDIDATE_POOL)
     probabilities=model.predict_proba(X)[:,1] if hasattr(model,"predict_proba") else model.predict(X).astype(float)*0.98+0.01
     scores=probabilities.reshape(len(track),-1)
     scores=scores/(scores.sum(axis=1,keepdims=True)+1e-9)
@@ -87,7 +92,7 @@ def predict(trip_id:str):
         _, _, _, reference_route = read_trip(folder, include_route=True)
         if len(reference_route):
             _, _, eval_candidate_ids, _, eval_target = candidate_rows(
-                track, net, route=reference_route, k=MODEL_K
+                track, net, route=reference_route, k=MODEL_K, candidate_pool=CANDIDATE_POOL
             )
             valid = eval_target >= 0
             candidate_matrix = eval_candidate_ids.reshape(len(track), -1)
