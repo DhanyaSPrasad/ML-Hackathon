@@ -9,6 +9,10 @@ from pathsnap.core import trip_features,viterbi
 ROOT=Path(__file__).resolve().parents[1];DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results";MODEL_DIR=ROOT/"pathsnap"/"models";OUT.mkdir(parents=True,exist_ok=True)
 K=8;POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"))
+try:
+    DECODER=json.loads((MODEL_DIR/"decoder_metadata.json").read_text()).get("best_params",{})
+except (FileNotFoundError,ValueError):
+    DECODER={}
 
 def partition_path(name):
     for p in (DATA/name,DATA/"train"/name):
@@ -38,8 +42,12 @@ for name,model in models:
         fractions=X["projection_fraction"].to_numpy(dtype=float)
         displacement=X["gps_displacement_m"].to_numpy(dtype=float).reshape(n,K)[:,0]
         decoded=viterbi(cids,dists,prob.ravel(),arcs,k=K,time_gaps=gaps,
-          gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S","5")),
-          projection_fractions=fractions,arc_lengths=arc_lengths,gps_displacements=displacement)
+          gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S",DECODER.get("gap_reset_s",5.0))),
+          transition_penalty=DECODER.get("transition_penalty",3.0),
+          projection_fractions=fractions,arc_lengths=arc_lengths,gps_displacements=displacement,
+          speed_weight=DECODER.get("speed_weight",0.015),
+          max_speed_mps=DECODER.get("max_speed_mps",55.0),
+          distance_scale_m=DECODER.get("distance_scale_m",80.0))
         valid=target>=0
         miss=np.asarray([target[i] not in cand[i] for i in range(n)])
         rows.append({"model":name,"trip_id":folder.name,"observations":n,
