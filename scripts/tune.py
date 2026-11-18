@@ -12,6 +12,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier
 from pathsnap.core import trip_features, FEATURES
+from pathsnap.artifacts import read_model_metadata
 
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results"; MOD=ROOT/"pathsnap"/"models"
@@ -83,7 +84,12 @@ def score(model,trips,held):
 
 
 X,y,groups,train_trips=collect("train")
+model_metadata=read_model_metadata(MOD)
 selection=json.loads((MOD/"model_selection.json").read_text())
+if int(model_metadata["k_candidates"]) != K or int(model_metadata["candidate_pool"]) != POOL:
+    raise ValueError("Candidate settings differ from train.py metadata. Re-run train.py or use the same PATHSNAP_CANDIDATE_POOL.")
+if selection.get("features") != FEATURES or selection.get("selected_model") != model_metadata.get("selected_classifier"):
+    raise ValueError("model_selection.json is stale; rerun scripts/train.py")
 kind=selection["selected_model"]
 cv=GroupKFold(n_splits=min(5,len(np.unique(groups))))
 splits=list(cv.split(X,y,groups))
@@ -102,7 +108,7 @@ model=build(best_trial,kind)
 start=time.perf_counter();model.fit(X,y);fit_s=time.perf_counter()-start
 joblib.dump(model,MOD/"final_model.joblib")
 (MOD/"model_metadata.json").write_text(json.dumps({
- "features":FEATURES,"k_candidates":K,"candidate_pool":POOL,
+ "schema_version":2,"features":FEATURES,"k_candidates":K,"candidate_pool":POOL,
  "observations_per_trip":"full resolution","random_seed":SEED,
  "cv":"5-fold GroupKFold grouped by trip ID",
  "selected_classifier":kind,"label_definition":"Monotonic dynamic-programming alignment to ordered reference route; weak geometric supervision.",
@@ -130,7 +136,7 @@ summary={"selected_classifier":kind,"sampler":"Optuna TPE",
  "objective":"5-fold GroupKFold observation-level Top-1 accuracy on training trips",
  "trials":N_TRIALS,"best_params":study.best_params,"best_cv_top1_accuracy":study.best_value,
  "training_trip_count":len(set(groups)),"training_candidate_rows":len(X),
- "candidate_pool":POOL,"k_candidates":K,"features":FEATURES,
+ "candidate_pool":POOL,"k_candidates":K,"features":FEATURES,"schema_version":2,
  "final_fit_seconds":fit_s,"evaluator_partition_used":False}
 (OUT/"bayesian_best.json").write_text(json.dumps(summary,indent=2))
 print(json.dumps(summary,indent=2))

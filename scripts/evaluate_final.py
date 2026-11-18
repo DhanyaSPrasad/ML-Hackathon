@@ -13,15 +13,16 @@ import joblib
 import numpy as np
 import pandas as pd
 from pathsnap.core import read_trip, make_network, candidate_rows, viterbi
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "Student folder"
 MODELS = ROOT / "pathsnap" / "models"
 OUT = ROOT / "pathsnap" / "results"
-MODEL = joblib.load(MODELS / "final_model.joblib")
-metadata = json.loads((MODELS / "model_metadata.json").read_text())
+metadata = read_model_metadata(MODELS)
+MODEL = validate_estimator(joblib.load(MODELS / "final_model.joblib"), metadata)
 k = int(metadata.get("k_candidates", 8))
-decoder = json.loads((MODELS / "decoder_metadata.json").read_text()).get("best_params", {})
+decoder = read_decoder_metadata(MODELS, metadata).get("best_params", {})
 
 
 def partition_path():
@@ -75,7 +76,8 @@ for folder in folders:
     # Only after predictions are fixed, read the reference route for scoring.
     _, _, _, reference_route = read_trip(folder, include_route=True)
     _, _, _, _, target = candidate_rows(
-        track, network, route=reference_route, k=k)
+        track, network, route=reference_route, k=k,
+        candidate_pool=int(metadata.get("candidate_pool", 64)))
     valid = target >= 0
     miss = np.asarray([target[i] not in candidates[i] for i in range(len(track))])
     n_valid = int(valid.sum())

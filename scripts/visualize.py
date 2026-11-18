@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import sys
+import json
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from folium import FeatureGroup
 from pathsnap.core import read_trip, make_network, candidate_rows, viterbi
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"; RES=ROOT/"pathsnap"/"results"; VIS=ROOT/"pathsnap"/"visuals"
 VIS.mkdir(parents=True,exist_ok=True)
 
@@ -23,22 +25,21 @@ def partition_path(name):
 # Rebuild plots from the actual model-comparison CSV.
 metrics=pd.read_csv(RES/"model_comparison.csv")
 for metric,title,filename in [
-    ("cv_macro_f1_mean","Trip-grouped CV Macro F1","cv_macro_f1.png"),
-    ("student_top1_accuracy","Student-test observation Top-1 Accuracy","student_accuracy.png"),
-    ("student_macro_f1","Student-test candidate Macro F1","student_macro_f1.png"),
-    ("student_log_loss","Student-test candidate Log Loss","student_log_loss.png")]:
+    ("cv_top1_accuracy_mean","Trip-grouped CV observation Top-1 Accuracy","cv_top1_accuracy.png"),
+    ("student_test_top1_accuracy","Student-test observation Top-1 Accuracy","student_accuracy.png"),
+    ("student_test_candidate_miss_rate","Student-test candidate miss rate","student_candidate_miss_rate.png")]:
     if metric not in metrics: continue
     d=metrics.dropna(subset=[metric]); fig,ax=plt.subplots(figsize=(9,4.8)); ax.bar(d.model,d[metric]); ax.set_title(title); ax.set_ylabel(metric); ax.tick_params(axis="x",rotation=20); fig.tight_layout(); fig.savefig(VIS/filename,dpi=160); plt.close(fig)
 
-model=joblib.load(ROOT/"pathsnap"/"models"/"final_model.joblib")
-k=8
+metadata=read_model_metadata(ROOT/"pathsnap"/"models")
+model=validate_estimator(joblib.load(ROOT/"pathsnap"/"models"/"final_model.joblib"),metadata)
+k=int(metadata["k_candidates"])
 base=partition_path("student_test")
 folders=[p for p in sorted(base.iterdir()) if p.is_dir() and (p/f"{p.name}.track").is_file()]
 if not folders: raise RuntimeError("No student_test trips found")
 folder=folders[0]
 track,nodes,arcs,route=read_trip(folder,include_route=True); net=make_network(nodes,arcs)
-metadata=json.loads((ROOT/"pathsnap"/"models"/"model_metadata.json").read_text())
-decoder=json.loads((ROOT/"pathsnap"/"models"/"decoder_metadata.json").read_text()).get("best_params",{})
+decoder=read_decoder_metadata(ROOT/"pathsnap"/"models",metadata).get("best_params",{})
 X,_,cids,dists,_=candidate_rows(track,net,route=None,k=k,candidate_pool=int(metadata.get("candidate_pool",64)))
 probs=model.predict_proba(X)[:,1]; scores=probs.reshape(len(track),k); scores=scores/(scores.sum(axis=1,keepdims=True)+1e-9)
 time_gaps=np.r_[0.0,np.diff(track.timestamp.to_numpy(dtype=float))]

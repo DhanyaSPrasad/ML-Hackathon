@@ -11,7 +11,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier
-from pathsnap.core import trip_features,viterbi
+from pathsnap.core import trip_features,viterbi,FEATURES
+from pathsnap.artifacts import read_model_metadata
 
 ROOT=Path(__file__).resolve().parents[1];DATA=ROOT/"Student folder"
 MOD=ROOT/"pathsnap"/"models";OUT=ROOT/"pathsnap"/"results"
@@ -65,8 +66,17 @@ def movement_inputs(t):
       "gps_displacements":X["gps_displacement_m"].to_numpy(dtype=float).reshape(n,k)[:,0]}
 
 
+model_metadata=read_model_metadata(MOD)
 meta=json.loads((OUT/"bayesian_best.json").read_text())
 kind=meta["selected_classifier"];params=meta["best_params"]
+if kind != model_metadata.get("selected_classifier"):
+    raise ValueError("Classifier tuning result does not match model_metadata.json; rerun scripts/tune.py")
+if meta.get("features") != FEATURES or meta.get("features") != model_metadata.get("features"):
+    raise ValueError("Classifier tuning feature schema is stale; rerun scripts/train.py and scripts/tune.py")
+if int(meta.get("k_candidates", 0)) != int(model_metadata["k_candidates"]) or int(meta.get("candidate_pool", 0)) != int(model_metadata["candidate_pool"]):
+    raise ValueError("Classifier tuning candidate configuration differs from model metadata")
+if K != int(model_metadata["k_candidates"]) or POOL != int(model_metadata["candidate_pool"]):
+    raise ValueError("Decoder tuning candidate settings differ from model metadata; use the same PATHSNAP_CANDIDATE_POOL as training.")
 X,y,groups,trips=collect()
 cv=GroupKFold(n_splits=min(5,len(np.unique(groups))))
 oof={}
@@ -98,7 +108,8 @@ def objective(trial):
 study=optuna.create_study(direction="maximize",sampler=optuna.samplers.TPESampler(seed=42))
 study.optimize(objective,n_trials=TRIALS,show_progress_bar=False)
 result={"classifier":kind,"method":"5-fold out-of-fold training predictions; no student/evaluator test labels",
- "trials":TRIALS,"best_params":study.best_params,"best_oof_top1_accuracy":study.best_value}
+ "trials":TRIALS,"best_params":study.best_params,"best_oof_top1_accuracy":study.best_value,
+ "features":FEATURES,"k_candidates":K,"candidate_pool":POOL,"schema_version":2}
 (MOD/"decoder_metadata.json").write_text(json.dumps(result,indent=2))
 pd.DataFrame([{"trial":t.number,"value":t.value,**t.params} for t in study.trials]).to_csv(OUT/"decoder_trials.csv",index=False)
 print(json.dumps(result,indent=2))
