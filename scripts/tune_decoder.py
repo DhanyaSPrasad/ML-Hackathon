@@ -75,6 +75,8 @@ if meta.get("features") != FEATURES or meta.get("features") != model_metadata.ge
     raise ValueError("Classifier tuning feature schema is stale; rerun scripts/train.py and scripts/tune.py")
 if int(meta.get("k_candidates", 0)) != int(model_metadata["k_candidates"]) or int(meta.get("candidate_pool", 0)) != int(model_metadata["candidate_pool"]):
     raise ValueError("Classifier tuning candidate configuration differs from model metadata")
+if K != int(model_metadata["k_candidates"]) or POOL != int(model_metadata["candidate_pool"]):
+    raise ValueError("Decoder tuning candidate settings differ from model metadata; use the same PATHSNAP_CANDIDATE_POOL as training.")
 X,y,groups,trips=collect()
 cv=GroupKFold(n_splits=min(5,len(np.unique(groups))))
 oof={}
