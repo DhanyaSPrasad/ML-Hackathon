@@ -68,6 +68,7 @@ def read_decoder_metadata(models_dir, model_metadata):
         "features": list(FEATURES),
         "k_candidates": int(model_metadata["k_candidates"]),
         "candidate_pool": int(model_metadata["candidate_pool"]),
+        "candidate_radius_m": float(model_metadata["candidate_radius_m"]),
     }
     for key, value in expected.items():
         if decoder.get(key) != value:
