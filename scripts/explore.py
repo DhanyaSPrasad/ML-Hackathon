@@ -7,8 +7,12 @@ from scipy.sparse.csgraph import connected_components
 from pathsnap.core import read_trip
 ROOT=Path(__file__).resolve().parents[1];DATA=ROOT/'Student folder';OUT=ROOT/'pathsnap/results';OUT.mkdir(exist_ok=True,parents=True)
 rows=[];network=[]
+def partition_path(name):
+ for path in (DATA/name,DATA/'train'/name):
+  if path.is_dir():return path
+ raise FileNotFoundError(f'Missing partition {name}')
 for part in ['train','student_test']:
- for folder in sorted((DATA/part).iterdir()):
+ for folder in sorted(partition_path(part).iterdir()):
   if not folder.is_dir():continue
   try:
    t,n,a,r=read_trip(folder); dt=np.diff(t.timestamp.to_numpy()); edges=a.to_numpy(dtype=int); valid=(edges[:,0]>=0)&(edges[:,1]>=0)&(edges[:,0]<len(n))&(edges[:,1]<len(n)); edges=edges[valid]
