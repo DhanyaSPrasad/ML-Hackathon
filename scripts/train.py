@@ -123,6 +123,13 @@ for name,model in make_models().items():
 results=pd.DataFrame(rows).sort_values(["cv_top1_accuracy_mean","cv_top1_accuracy_std"],ascending=[False,True])
 results.to_csv(OUT/"model_comparison.csv",index=False)
 best=results.iloc[0].to_dict()
+(MOD/"model_metadata.json").write_text(json.dumps({
+ "features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,
+ "observations_per_trip":"full resolution","random_seed":SEED,
+ "cv":"5-fold GroupKFold grouped by trip ID",
+ "label_definition":"Monotonic dynamic-programming alignment to ordered reference route; weak geometric supervision.",
+ "missed_candidate_policy":"Excluded from classifier fitting; counted as Top-1 errors.",
+ "evaluator_partition_used":False},indent=2))
 (MOD/"model_selection.json").write_text(json.dumps({
  "selection_metric":"mean 5-fold GroupKFold observation-level Top-1 accuracy",
  "selected_model":best["model"],"cv_top1_accuracy_mean":best["cv_top1_accuracy_mean"],
