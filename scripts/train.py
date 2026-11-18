@@ -17,7 +17,7 @@ from pathsnap.core import trip_features, FEATURES, viterbi
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results"; MOD=ROOT/"pathsnap"/"models"; VIS=ROOT/"pathsnap"/"visuals"
 for p in (OUT,MOD,VIS): p.mkdir(parents=True,exist_ok=True)
-SEED=42; K=8; CANDIDATE_POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"))
+SEED=42; K=8; CANDIDATE_POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
 
 
 def partition_path(name):
@@ -32,7 +32,7 @@ def collect(name):
     for folder in folders:
         try:
             track,nodes,arcs,route,net,X,y,cids,dists,target=trip_features(
-                folder,k=K,candidate_pool=CANDIDATE_POOL)
+                folder,k=K,candidate_pool=CANDIDATE_POOL,radius_m=RADIUS_M)
             if y is None: continue
             cand=cids.reshape(len(track),K)
             hit=np.any(cand==target[:,None],axis=1)
@@ -109,7 +109,7 @@ results=pd.DataFrame(rows).sort_values(["cv_top1_accuracy_mean","cv_top1_accurac
 results.to_csv(OUT/"model_comparison.csv",index=False)
 best=results.iloc[0].to_dict()
 (MOD/"model_metadata.json").write_text(json.dumps({
- "schema_version":2,"features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,
+ "schema_version":3,"features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,"candidate_radius_m":RADIUS_M,
  "selected_classifier":best["model"],
  "observations_per_trip":"full resolution","random_seed":SEED,
  "cv":"5-fold GroupKFold grouped by trip ID",
@@ -121,5 +121,5 @@ best=results.iloc[0].to_dict()
  "selected_model":best["model"],"cv_top1_accuracy_mean":best["cv_top1_accuracy_mean"],
  "cv_top1_accuracy_std":best["cv_top1_accuracy_std"],"candidate_pool":CANDIDATE_POOL,
  "k_candidates":K,"features":FEATURES,"training_trips":len(train_ids),
- "student_test_used_for_selection":False,"schema_version":2},indent=2))
+ "student_test_used_for_selection":False,"candidate_radius_m":RADIUS_M,"schema_version":3},indent=2))
 print("Selected model:",best["model"],flush=True)
