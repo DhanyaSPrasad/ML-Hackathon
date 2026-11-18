@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import joblib
-from pathsnap.artifacts import read_model_metadata, validate_estimator
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = ROOT / "pathsnap" / "models"
@@ -28,7 +28,7 @@ def main():
     metadata = read_model_metadata(MODELS)
     selection = read_json(MODELS / "model_selection.json")
     tuning = read_json(RESULTS / "bayesian_best.json")
-    decoder = read_json(MODELS / "decoder_metadata.json")
+    decoder = read_decoder_metadata(MODELS, metadata)
     model_path = MODELS / "final_model.joblib"
     if not model_path.is_file():
         raise FileNotFoundError(f"Missing {model_path.relative_to(ROOT)}")
@@ -45,14 +45,6 @@ def main():
             raise ValueError(f"{name} candidate count differs from model_metadata.json")
         if int(artifact.get("candidate_pool", 0)) != int(metadata["candidate_pool"]):
             raise ValueError(f"{name} candidate pool differs from model_metadata.json")
-    if decoder.get("classifier") != selected:
-        raise ValueError("decoder_metadata.json was tuned for a different classifier")
-    if decoder.get("features") != metadata["features"]:
-        raise ValueError("decoder_metadata.json feature schema differs from model_metadata.json")
-    if int(decoder.get("k_candidates", 0)) != int(metadata["k_candidates"]):
-        raise ValueError("Decoder candidate count differs from model_metadata.json")
-    if int(decoder.get("candidate_pool", 0)) != int(metadata["candidate_pool"]):
-        raise ValueError("Decoder candidate pool differs from model_metadata.json")
 
     model = joblib.load(model_path)
     validate_estimator(model, metadata)
