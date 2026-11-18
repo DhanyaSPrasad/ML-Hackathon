@@ -101,17 +101,27 @@ best_trial=optuna.trial.FixedTrial(study.best_params)
 model=build(best_trial,kind)
 start=time.perf_counter();model.fit(X,y);fit_s=time.perf_counter()-start
 joblib.dump(model,MOD/"final_model.joblib")
+(MOD/"model_metadata.json").write_text(json.dumps({
+ "features":FEATURES,"k_candidates":K,"candidate_pool":POOL,
+ "observations_per_trip":"full resolution","random_seed":SEED,
+ "cv":"5-fold GroupKFold grouped by trip ID",
+ "selected_classifier":kind,"label_definition":"Monotonic dynamic-programming alignment to ordered reference route; weak geometric supervision.",
+ "missed_candidate_policy":"Excluded from classifier fitting; counted as Top-1 errors.",
+ "evaluator_partition_used":False},indent=2))
 
 rows=[]
 try:
     _,_,_,dev_trips=collect("student_test")
-    for label,estimator in [("Tuned",model)]:
+    baseline_path=MOD/(kind.lower().replace(" ","_")+".joblib")
+    baseline=joblib.load(baseline_path) if baseline_path.exists() else None
+    for label,estimator in [("Untuned",baseline),("Tuned",model)]:
+        if estimator is None: continue
         correct=total=0
         for tid,Xt,cids,target,n in dev_trips:
             p=estimator.predict_proba(Xt)[:,1].reshape(n,K)
             cand=cids.reshape(n,K);pred=cand[np.arange(n),np.argmax(p,axis=1)]
             valid=target>=0;correct+=int(np.sum((pred==target)&valid));total+=int(valid.sum())
-        rows.append({"model":label,"student_test_top1_accuracy":correct/max(total,1)})
+        rows.append({"model":label,"classifier":kind,"student_test_top1_accuracy":correct/max(total,1)})
 except FileNotFoundError:
     pass
 pd.DataFrame(rows).to_csv(OUT/"tuned_vs_untuned.csv",index=False)
