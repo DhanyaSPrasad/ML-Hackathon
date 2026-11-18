@@ -21,7 +21,7 @@ OUT = ROOT / "pathsnap" / "results"
 MODEL = joblib.load(MODELS / "final_model.joblib")
 metadata = json.loads((MODELS / "model_metadata.json").read_text())
 k = int(metadata.get("k_candidates", 8))
-decoder = metadata.get("inference_decoder", {})
+decoder = json.loads((MODELS / "decoder_metadata.json").read_text()).get("best_params", {})
 
 
 def partition_path():
@@ -34,18 +34,28 @@ def partition_path():
 def infer_without_labels(folder):
     track, nodes, arcs, _ = read_trip(folder, include_route=False)
     network = make_network(nodes, arcs)
-    X, _, candidate_ids, distances, _ = candidate_rows(track, network, route=None, k=k)
+    X, _, candidate_ids, distances, _ = candidate_rows(
+        track, network, route=None, k=k,
+        candidate_pool=int(metadata.get("candidate_pool", 64)))
     probabilities = MODEL.predict_proba(X)[:, 1]
     scores = probabilities.reshape(len(track), k)
     scores = scores / (scores.sum(axis=1, keepdims=True) + 1e-9)
     candidates = candidate_ids.reshape(len(track), k)
     classifier = candidates[np.arange(len(track)), np.argmax(scores, axis=1)]
     gaps = np.r_[0.0, np.diff(track.timestamp.to_numpy(dtype=float))]
+    arc_lengths = np.zeros(len(arcs), dtype=float)
+    arc_lengths[network["ids"]] = network["lengths"]
+    fractions = X["projection_fraction"].to_numpy(dtype=float)
+    displacement = X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track), k)[:, 0]
     decoded = viterbi(
         candidate_ids, distances, scores.reshape(-1), arcs, k=k,
-        time_gaps=gaps,
-        transition_penalty=float(decoder.get("transition_penalty", 3.0)),
+        time_gaps=gaps, transition_penalty=float(decoder.get("transition_penalty", 3.0)),
         gap_reset_s=float(decoder.get("gap_reset_s", 5.0)),
+        projection_fractions=fractions, arc_lengths=arc_lengths,
+        gps_displacements=displacement,
+        speed_weight=float(decoder.get("speed_weight", 0.015)),
+        max_speed_mps=float(decoder.get("max_speed_mps", 55.0)),
+        distance_scale_m=float(decoder.get("distance_scale_m", 80.0)),
     )
     return track, network, candidates, classifier, decoded
 

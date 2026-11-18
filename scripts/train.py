@@ -73,17 +73,16 @@ def candidate_prob(model,X):
 
 
 def evaluate_top1(model,trips):
-    correct=total=0; all_y=[]; all_pred=[]; all_prob=[]
+    correct=total=misses=0
     for trip in trips:
         n=len(trip["track"]); cand=trip["cids"].reshape(n,K)
         p=candidate_prob(model,trip["X"]).reshape(n,K)
         pred=cand[np.arange(n),np.argmax(p,axis=1)]
         target=trip["target"]; valid=target>=0
+        hit=np.any(cand==target[:,None],axis=1)
+        misses+=int(np.sum((~hit)&valid))
         correct+=int(np.sum((pred==target)&valid)); total+=int(valid.sum())
-        all_y.extend((cand[valid]==target[valid,None]).astype(int).ravel())
-        all_pred.extend((np.argmax(p[valid],axis=1)==np.argmax(cand[valid]==target[valid,None],axis=1)).astype(int))
-        all_prob.extend(p[valid].ravel())
-    return correct/max(total,1),total
+    return correct/max(total,1),total,misses/max(total,1)
 
 
 def cv_top1(model_template,X,y,groups,trips,cv):
@@ -93,7 +92,7 @@ def cv_top1(model_template,X,y,groups,trips,cv):
         model.fit(X.iloc[fit_idx],y[fit_idx])
         held=set(groups[val_idx])
         fold_trips=[t for t in trips if t["id"] in held]
-        score,_=evaluate_top1(model,fold_trips); scores.append(score)
+        score,_,_=evaluate_top1(model,fold_trips); scores.append(score)
     return float(np.mean(scores)),float(np.std(scores))
 
 
@@ -114,8 +113,9 @@ for name,model in make_models().items():
     row={"model":name,"cv_top1_accuracy_mean":mean,"cv_top1_accuracy_std":std,
          "cv_seconds":cv_s,"training_seconds":fit_s,"features":len(FEATURES)}
     if dev_trips:
-        top1,_=evaluate_top1(model,dev_trips)
+        top1,_,miss_rate=evaluate_top1(model,dev_trips)
         row["student_test_top1_accuracy"]=top1
+        row["student_test_candidate_miss_rate"]=miss_rate
     rows.append(row)
     joblib.dump(model,MOD/(name.lower().replace(" ","_")+".joblib"))
     print(name,"CV Top-1",round(mean,4),"+/-",round(std,4),flush=True)
