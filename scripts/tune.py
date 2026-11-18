@@ -5,12 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np, pandas as pd, joblib, optuna
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier,ExtraTreesClassifier
+from pathsnap.modeling import build_model
 from pathsnap.core import trip_features, FEATURES
 from pathsnap.artifacts import read_model_metadata
 
@@ -43,34 +38,7 @@ def collect(name):
 
 
 def build(trial,kind):
-    if kind=="Logistic Regression":
-        c=trial.suggest_float("C",1e-3,100,log=True)
-        return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
-            LogisticRegression(C=c,max_iter=1500,class_weight="balanced",random_state=SEED))
-    if kind=="K-Nearest Neighbours":
-        k=trial.suggest_int("n_neighbors",3,35,step=2)
-        weights=trial.suggest_categorical("weights",["uniform","distance"])
-        p=trial.suggest_categorical("p",[1,2])
-        return make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),
-            KNeighborsClassifier(n_neighbors=k,weights=weights,p=p,n_jobs=-1))
-    if kind=="Decision Tree":
-        return make_pipeline(SimpleImputer(strategy="median"),DecisionTreeClassifier(
-            max_depth=trial.suggest_int("max_depth",4,40),
-            min_samples_split=trial.suggest_int("min_samples_split",2,20),
-            min_samples_leaf=trial.suggest_int("min_samples_leaf",1,12),
-            criterion=trial.suggest_categorical("criterion",["gini","entropy","log_loss"]),
-            class_weight="balanced",random_state=SEED))
-    common=dict(n_estimators=trial.suggest_int("n_estimators",120,500,step=20),
-        max_depth=trial.suggest_int("max_depth",6,40),
-        min_samples_split=trial.suggest_int("min_samples_split",2,20),
-        min_samples_leaf=trial.suggest_int("min_samples_leaf",1,10),
-        max_features=trial.suggest_categorical("max_features",["sqrt","log2",0.5,0.7,0.9,1.0]),
-        n_jobs=-1,random_state=SEED)
-    if kind=="Random Forest":
-        common["class_weight"]=trial.suggest_categorical("class_weight",["balanced","balanced_subsample",None])
-        return make_pipeline(SimpleImputer(strategy="median"),RandomForestClassifier(**common))
-    return make_pipeline(SimpleImputer(strategy="median"),ExtraTreesClassifier(
-        **common,class_weight=trial.suggest_categorical("class_weight",["balanced",None])))
+    return build_model(kind, trial=trial)
 
 
 def score(model,trips,held):
@@ -104,7 +72,7 @@ def objective(trial):
 study=optuna.create_study(direction="maximize",sampler=optuna.samplers.TPESampler(seed=SEED))
 study.optimize(objective,n_trials=N_TRIALS,show_progress_bar=False)
 best_trial=optuna.trial.FixedTrial(study.best_params)
-model=build(best_trial,kind)
+model=build_model(kind,params=study.best_params)
 start=time.perf_counter();model.fit(X,y);fit_s=time.perf_counter()-start
 joblib.dump(model,MOD/"final_model.joblib")
 (MOD/"model_metadata.json").write_text(json.dumps({
