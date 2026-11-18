@@ -269,7 +269,8 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
         reset = gaps[t] > gap_reset_s or gaps[t] <= 0
         for j, aid in enumerate(cand[t]):
             if aid < 0 or aid >= len(edge):
-                dp[t-1, :] = dp[t-1, :]
+                if j == 0:
+                    next_row = np.full(k, -1e12, dtype=float)
                 continue
             current_from = edge[aid, 0]
             best_value, best_prev = -np.inf, 0
