@@ -1,38 +1,44 @@
-# PathSnap architecture
+# PathSnap architecture and data boundaries
 
 ```text
-Per-trip .track/.nodes/.arcs/.route files
-                  |
-                  v
-       Data loader and EDA scripts
-                  |
-                  v
-       KD-tree candidate generation
-                  |
-                  v
-       Candidate feature extraction
-                  |
-                  v
-     Five classifier experiments
-                  |
-                  v
-    Random Forest + Bayesian TPE tune
-                  |
-                  v
-       Candidate probability scores
-                  |
-                  v
-        HMM / Viterbi decoder
-                  |
-                  v
-       Predicted directed arc route
-                  |
-                  v
-      FastAPI (Laptop 1, port 8000)
-                  ^
-                  | HTTP request/response
-                  v
-      Leaflet UI (Laptop 2, port 8080)
+Raw trip files (.track / .nodes / .arcs / .route)
+          |
+          v
+Data validation and preprocessing
+  - numeric coercion / coordinate validation
+  - invalid GPS row removal / stable time sorting
+  - directed arc endpoint validation
+          |
+          v
+Local metric projection + KD-tree road candidate search
+          |
+          v
+Candidate feature extraction (11 features)
+          |
+          v
+Five classifiers + trip-grouped cross-validation
+          |
+          v
+Random Forest TPE Bayesian optimisation
+          |
+          v
+Candidate scores -> gap-aware HMM/Viterbi decoder
+          |
+          v
+Predicted directed road-segment sequence
+          |
+          v
+FastAPI on Laptop 1 <---- HTTP ----> Leaflet UI on Laptop 2
 ```
 
-Reference `.route` values are used only in offline training/development labels and server-side aggregate evaluation. The UI receives predicted arc IDs/geometry and aggregate metrics, not reference route IDs. The supplied archive has no separate evaluator partition; the API partition is configurable through `PATHSNAP_TRIP_PARTITION`.
+## Offline training/development boundary
+
+The training and student-test scripts may read reference `.route` files to construct weak geometric labels and measure development performance. The positive candidate is the closest segment among the supplied reference-route arcs to a GPS observation. This is an approximation, not independently verified physical ground truth.
+
+## Prediction boundary
+
+The API first calls `read_trip(..., include_route=False)` and `candidate_rows(..., route=None)` to make predictions without reference labels. After route decoding is complete, it may read `.route` to calculate aggregate classifier-only and decoded-route Top-1 accuracy and candidate miss rate. Raw labels do not enter features, model inputs, decoding or the response; only aggregate metrics are returned. For the final demonstration, `PATHSNAP_TRIP_PARTITION=evaluator_test` selects the evaluator trips.
+
+## Partition resolution
+
+The code accepts either `Student folder/<partition>` or `Student folder/train/<partition>`. Training-trip discovery requires each folder to contain its own `<trip_id>.track` file, preventing nested `student_test` or `evaluator_test` folders from being accidentally ingested as training trips.

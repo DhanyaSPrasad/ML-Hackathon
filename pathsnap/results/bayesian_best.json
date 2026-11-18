@@ -1,15 +1,18 @@
 {
+  "sampler": "Optuna TPESampler",
+  "objective": "3-fold GroupKFold observation-level Top-1 accuracy, grouped by trip ID",
+  "trials": 30,
   "best_params": {
-    "n_estimators": 27,
-    "max_depth": 16,
-    "min_samples_leaf": 5,
-    "max_features": "sqrt"
+    "n_estimators": 158,
+    "max_depth": 11,
+    "min_samples_split": 9,
+    "min_samples_leaf": 4,
+    "max_features": 0.9
   },
-  "best_cv_macro_f1": 0.8457062250887752,
-  "search_training_samples": 25600,
-  "group_count": 80,
-  "trials": 3,
-  "refit_seconds": 0.9228508472442627,
-  "final_model_fit_samples": 25600,
-  "final_model_fit_observations_per_trip": 40
+  "best_cv_top1_accuracy": 0.7742046533713202,
+  "training_trip_count": 80,
+  "training_candidate_rows": 76800,
+  "observations_per_training_trip": 120,
+  "final_fit_seconds": 10.983551999990596,
+  "evaluator_partition_used": false
 }

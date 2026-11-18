@@ -1,89 +1,117 @@
 # PathSnap — Distributed Map-Matching & Route Reconstruction
 
-A compact end-to-end implementation for the PES University UE24CS352A ML hackathon. It loads per-trip GPS tracks and directed road networks, generates nearby road-segment candidates, trains and compares five classifiers, tunes a Random Forest with Optuna's TPE Bayesian sampler, decodes candidate sequences with Viterbi, and serves inference through FastAPI with a separate browser UI.
+PathSnap reconstructs plausible directed-road sequences from noisy GPS observations. The repository contains the data-processing and feature-engineering pipeline, five-model experiment, Optuna Bayesian search, HMM/Viterbi decoder, FastAPI prediction service, Leaflet UI and visualisations.
 
-## Dataset layout
+## Dataset layout and partition safety
 
-The supplied data is included under `Student folder/`:
+The code supports both layouts used by the supplied material:
 
-- `train/`: 80 trips used for fitting and group-aware cross-validation.
-- `student_test/`: 10 trips used only for development-stage comparisons and the demonstration API.
-- Each trip has `.track`, `.nodes`, `.arcs`, and `.route` files.
+```text
+Student folder/
+├── train/                 # 80 training trips
+├── student_test/          # 10 development trips (may be nested under train/)
+└── evaluator_test/        # 10 final-evaluation trips (may be nested under train/)
+```
 
-**Important:** The uploaded dataset does not contain the separate evaluator-testing partition described in the hackathon guide. The UI currently lists the ten supplied student-test trips for development demonstration. For the final event, place the organiser-provided evaluator trips in `Student folder/evaluator_test/` and change the API partition setting to that directory. Do not use evaluator routes in training or tuning.
+A trip folder contains `<trip_id>.track`, `.nodes`, `.arcs` and `.route` files. The partition resolver checks both `Student folder/<partition>` and `Student folder/train/<partition>`.
+
+**Partition rules implemented in code:**
+- `scripts/preprocess.py`, `scripts/train.py`, `scripts/tune.py`, `scripts/evaluate.py` and `scripts/visualize.py` use only `train` and/or `student_test`.
+- No training, feature selection, hyperparameter selection or development metric is computed on `evaluator_test`.
+- The prediction API first calls `read_trip(..., include_route=False)` and generates candidates with `route=None`. Only after prediction is complete, it may read the reference `.route` file to calculate server-side Top-1 accuracy and candidate miss rate. Raw reference labels never enter features, model inputs, decoding, or the API response; the UI receives only aggregate metrics.
+- For the final demonstration, set `PATHSNAP_TRIP_PARTITION=evaluator_test` so the UI lists the ten evaluator trips. Prediction reads `.track`, `.nodes` and `.arcs`; reference `.route` is read only after prediction to calculate aggregate evaluation metrics.
+
+Do not use evaluator reference labels for development, tuning or model selection.
 
 ## Setup (Windows PowerShell)
 
 ```powershell
-py -3.11 -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Linux/macOS: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
+Python 3.10+ is supported. Use the same environment for all scripts. For a quick code smoke test, set `$env:PATHSNAP_OBS_PER_TRIP="12"` before running the training/tuning scripts; set `$env:PATHSNAP_TUNE_TRIALS="2"` for a quick tuning check. Remove both overrides for the full experiment (defaults: 120 observations per trip and 30 tuning trials).
 
-## Run the pipeline
+## Reproducible experiment workflow
 
-From the project root:
+Run from the repository root:
 
-```bash
+```powershell
+python scripts/preprocess.py
 python scripts/explore.py
 python scripts/train.py
-python scripts/refresh_model_metrics.py
 python scripts/tune.py
 python scripts/evaluate.py
 python scripts/visualize.py
-python scripts/build_report.py
+python -m unittest discover -s tests -v
 ```
 
-The scripts create the dataset inventory and connectivity summaries, train and compare five models, correct the observation-level Top-1 metric, run a compact Bayesian TPE search, evaluate classifier-only versus HMM decoding, generate plots/Folium maps, and build the technical report PDF. Initial five-model training is the longest step and can take several minutes on CPU. All metrics are generated from the actual supplied files; do not replace them with illustrative values. `refresh_model_metrics.py` is required after `train.py` because it computes the required observation-level Top-1 metric from the candidate groups.
+After the model and decoder settings are finalized, run `python scripts/evaluate_final.py` once to record the official `evaluator_test` inference metrics. Do not use those metrics to tune or select models.
 
-## Start API and UI (two laptops)
+### What each stage does
 
-**Laptop 1 — model and API:**
+1. **Preprocessing / audit** (`scripts/preprocess.py`, `pathsnap/core.py`): parses whitespace-delimited files, coerces numeric fields, removes invalid GPS rows, sorts observations chronologically without inventing interpolated positions, validates directed arc endpoints and records missing/invalid rows, timestamps, gaps, geography and network statistics.
+2. **Feature engineering** (`pathsnap/core.py`): builds a local metric coordinate plane; indexes directed-road midpoints with a KD-tree; retrieves the eight nearest candidates; computes point-to-segment cross-track distance, heading difference, road length/bearing, GPS speed, time gap, heading change, candidate rank, projection fraction, heading alignment and GPS displacement.
+3. **Five-model experiment** (`scripts/train.py`): Logistic Regression, KNN, Decision Tree, Random Forest and Extra Trees; median imputation is fitted inside each model pipeline and scaling is applied to LR/KNN. Uses 3-fold `GroupKFold` with trip ID as group. Reports training candidate metrics, CV Macro F1, student-test candidate metrics, observation Top-1 Accuracy, route continuity, log loss and runtime. Confusion matrices and tree feature-importance plots are saved.
+4. **Bayesian optimisation** (`scripts/tune.py`): Optuna TPE search for Random Forest using only training trips and 3-fold trip-grouped observation-level Top-1 accuracy. Saves trial history, best configuration, tuned model and a tuned-vs-untuned comparison on the same student-test partition.
+5. **Sequential decoding** (`scripts/evaluate.py`): compares classifier-only predictions with Viterbi decoding on student-test trips. A large timestamp gap resets the transition constraint so the decoder does not force continuity across a trajectory dropout.
+6. **Visualisation** (`scripts/visualize.py`): creates actual-result comparison plots and an interactive Folium map.
 
-```bash
+## Feature and label definitions
+
+The classifier is a candidate scorer: each GPS observation has up to eight nearby directed-road candidates. The positive candidate is the road segment with the smallest point-to-segment distance among the trip's supplied reference-route arcs. This is a **weak geometric label**, not independently verified ground truth. The candidate miss rate is recorded because the correct reference segment may not appear among the eight generated candidates.
+
+Reference routes are used in offline training/development scripts and, for final evaluator requests, loaded only after prediction to calculate aggregate server-side metrics. They never enter the inference feature matrix or decoder. Distances use a trip-local equirectangular metric approximation, suitable for the small spatial extent of an individual trip.
+
+**Metric levels:** `train_accuracy` and `student_test_candidate_accuracy` classify flattened candidate rows. `student_top1_accuracy` selects one candidate per GPS observation and compares its arc ID with the weak reference target. These are different metrics. Training accuracy is a resubstitution metric; use trip-grouped CV and student-test results to assess generalisation. The TPE search optimizes trip-grouped observation-level Top-1. The decoder comparison reports classifier and decoded Top-1 accuracy; continuity may improve while pointwise accuracy falls.
+
+## Key outputs
+
+| Output | Location |
+|---|---|
+| Preprocessing audit | `pathsnap/results/preprocessing_audit.csv` |
+| Feature distributions | `pathsnap/results/feature_summary_by_trip.csv` |
+| Five-model comparison | `pathsnap/results/model_comparison.csv` |
+| Confusion matrices | `pathsnap/visuals/confusion_*.png` |
+| Tree feature importance | `pathsnap/results/feature_importance_*.csv` |
+| Bayesian trials / best parameters | `pathsnap/results/bayesian_trials.csv`, `bayesian_best.json` |
+| Tuned vs untuned comparison | `pathsnap/results/tuned_vs_untuned.csv` |
+| HMM comparison | `pathsnap/results/route_decoder_comparison.csv`, `route_decoder_summary.json` |
+| Official evaluator score (one final run) | `pathsnap/results/evaluator_inference_accuracy.json`, `evaluator_inference_per_trip.csv` |
+| Trained models | `pathsnap/models/` |
+| Plots and Folium maps | `pathsnap/visuals/` |
+All numerical results are generated by the scripts.
+
+## Two-laptop deployment
+
+### Laptop 1 — API and model
+
+For local development using the student-test trips:
+
+```powershell
+$env:PATHSNAP_TRIP_PARTITION="student_test"
 uvicorn pathsnap.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Allow inbound TCP port 8000 in the laptop firewall. Find Laptop 1's LAN IP using `ipconfig` (Windows) or `hostname -I` (Linux).
+For the evaluator demonstration:
 
-**Laptop 2 — UI:** Copy/clone the project (the UI folder is sufficient) and serve it:
+```powershell
+$env:PATHSNAP_TRIP_PARTITION="evaluator_test"
+uvicorn pathsnap.api.main:app --host 0.0.0.0 --port 8000
+```
 
-```bash
+Allow inbound TCP port 8000 in the firewall and find Laptop 1's LAN IP with `ipconfig`.
+
+### Laptop 2 — UI
+
+```powershell
 python -m http.server 8080 --directory pathsnap/ui
 ```
 
-Open `http://localhost:8080/?api=http://LAPTOP1_LAN_IP:8000` in a browser, replacing the address with Laptop 1's LAN IP. Both laptops should be on the same network. The API logs each inference request and completion.
+Open `http://localhost:8080/?api=http://LAPTOP1_LAN_IP:8000`. Both laptops must be on the same network. The API exposes `GET /health`, `GET /trips` and `POST /predict/{trip_id}`. Prediction is completed without reference labels; the endpoint then calculates aggregate Top-1 accuracy and candidate miss rate server-side for the evaluator. It does not return the reference route or per-observation labels.
 
-API endpoints: `GET /health`, `GET /trips`, `POST /predict/{trip_id}`.
+## Academic integrity and limitations
 
-## Method overview and assumptions
-
-1. Each `.track` row is interpreted as longitude, latitude, timestamp; `.nodes` as longitude/latitude; `.arcs` as directed from-node/to-node rows; `.route` values are zero-based arc-row IDs.
-2. Candidate generation queries the eight nearest directed-arc midpoints in a local metric approximation. Features include GPS-to-midpoint distance, heading difference, road length/bearing, speed, time gap and candidate rank.
-3. Because the reference route is an ordered arc sequence and the supplied files do not provide a direct timestamp-to-route-arc alignment, training labels use a documented linear-progress alignment from GPS observation index to route sequence index. This is a weak-label approximation and a limitation; the report must discuss it. Candidate miss rate should be interpreted accordingly.
-4. Five classifiers are compared: Logistic Regression, KNN, Decision Tree, Random Forest and Extra Trees. GroupKFold keeps trips together.
-5. Optuna TPE optimises Random Forest macro-F1 over group-aware folds. The trial history is retained.
-6. Viterbi uses classifier candidate scores as emissions and a directed-edge connectivity reward/penalty as transitions. Disconnected transitions are penalised rather than silently treated as valid.
-7. The API reads reference routes internally for aggregate development evaluation. The browser receives predictions and aggregate metrics only; it never receives reference route IDs.
-
-## Deliverables
-
-- Source: `pathsnap/`, `scripts/`
-- Model artifacts: `pathsnap/models/`
-- Experiment logs/tables: `pathsnap/results/`
-- Visualisations: `pathsnap/visuals/`
-- Technical report: `pathsnap/report/`
-- This README and `requirements.txt`
-
-Run all scripts yourself before submission and review the generated results. The academic-integrity rules require that every team member understands and can defend the implementation and actual results.
-
-## Report and result files
-
-The generated report is `pathsnap/report/PathSnap_Technical_Report.pdf`. The experiment tables and logs are under `pathsnap/results/`; plots and the Folium map are under `pathsnap/visuals/`. Review the PDF and all result tables before submission.
-
-## Current measured development snapshot
-
-On the supplied student-test partition, the initial Random Forest achieved approximately 0.865 group-CV candidate Macro F1, 0.785 observation-level Top-1 Accuracy, and 0.870 student-test candidate Macro F1. The tuned model's candidate Macro F1 was approximately 0.864 and its observation-level Top-1 Accuracy approximately 0.773. Across the 10 development trips, the HMM improved directed route continuity (about 0.248 to 0.458) while reducing pointwise route accuracy (about 0.773 to 0.703). These are development results under the documented route-constrained nearest-segment labels, not final evaluator results.
+The route-constrained labels are approximate; the supplied reference route may itself have limitations. GPS gaps, candidate miss rate, disconnected road-network fragments and the local projection approximation affect performance. Do not fabricate results or report evaluator-test metrics from development runs. Team members should understand and be able to explain preprocessing, feature extraction, model comparison, TPE optimisation, emission/transition design and Viterbi decoding.
