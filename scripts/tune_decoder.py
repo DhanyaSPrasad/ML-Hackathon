@@ -55,7 +55,9 @@ if kind != model_metadata.get("selected_classifier"):
     raise ValueError("Classifier tuning result does not match model_metadata.json; rerun scripts/tune.py")
 if meta.get("features") != FEATURES or meta.get("features") != model_metadata.get("features"):
     raise ValueError("Classifier tuning feature schema is stale; rerun scripts/train.py and scripts/tune.py")
-if int(meta.get("k_candidates", 0)) != int(model_metadata["k_candidates"]) or int(meta.get("candidate_pool", 0)) != int(model_metadata["candidate_pool"]):
+if (int(meta.get("k_candidates", 0)) != int(model_metadata["k_candidates"])
+        or int(meta.get("candidate_pool", 0)) != int(model_metadata["candidate_pool"])
+        or float(meta.get("candidate_radius_m", -1)) != float(model_metadata["candidate_radius_m"])):
     raise ValueError("Classifier tuning candidate configuration differs from model metadata")
 if K != int(model_metadata["k_candidates"]) or POOL != int(model_metadata["candidate_pool"]) or RADIUS_M != float(model_metadata.get("candidate_radius_m", -1)):
     raise ValueError("Decoder tuning candidate settings differ from model metadata; use the same PATHSNAP_CANDIDATE_POOL as training.")
