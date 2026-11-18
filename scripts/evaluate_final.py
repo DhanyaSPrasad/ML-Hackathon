@@ -51,13 +51,14 @@ def infer_without_labels(folder):
     displacement = X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track), k)[:, 0]
     decoded = viterbi(
         candidate_ids, distances, scores.reshape(-1), arcs, k=k,
-        time_gaps=gaps, transition_penalty=float(decoder.get("transition_penalty", 3.0)),
-        gap_reset_s=float(decoder.get("gap_reset_s", 5.0)),
+        time_gaps=gaps, transition_penalty=float(decoder.get("beta", 100.0)),
+        gap_reset_s=float(decoder.get("gap_reset_s", 60.0)),
         projection_fractions=fractions, arc_lengths=arc_lengths,
         gps_displacements=displacement,
         speed_weight=float(decoder.get("speed_weight", 0.015)),
         max_speed_mps=float(decoder.get("max_speed_mps", 55.0)),
         distance_scale_m=float(decoder.get("distance_scale_m", 80.0)),
+        uturn_penalty=float(decoder.get("uturn_penalty", 10.0)),
     )
     return track, network, candidates, classifier, decoded
 
@@ -78,7 +79,7 @@ for folder in folders:
     _, _, _, reference_route = read_trip(folder, include_route=True)
     _, _, _, _, target = candidate_rows(
         track, network, route=reference_route, k=k,
-        candidate_pool=int(metadata.get("candidate_pool", 64)))
+        candidate_pool=int(metadata.get("candidate_pool", 64)), radius_m=radius_m)
     valid = target >= 0
     miss = np.asarray([target[i] not in candidates[i] for i in range(len(track))])
     n_valid = int(valid.sum())
