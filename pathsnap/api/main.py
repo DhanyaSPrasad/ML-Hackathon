@@ -4,6 +4,7 @@ import sys, os, logging
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 import joblib
+import json
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,11 @@ PARTITION=os.environ.get("PATHSNAP_TRIP_PARTITION","student_test")
 MODEL_PATH=ROOT/"pathsnap"/"models"/"final_model.joblib"
 model=joblib.load(MODEL_PATH) if MODEL_PATH.exists() else None
 MODEL_K=8
+DECODER_PATH=ROOT/"pathsnap"/"models"/"decoder_metadata.json"
+try:
+    DECODER_PARAMS=json.loads(DECODER_PATH.read_text()).get("best_params",{})
+except (FileNotFoundError,ValueError):
+    DECODER_PARAMS={}
 # Fail clearly if a repository still contains an artifact from the previous
 # feature schema; run train.py followed by tune.py to rebuild it.
 if model is not None and getattr(model, "n_features_in_", len(FEATURES)) != len(FEATURES):
@@ -63,9 +69,13 @@ def predict(trip_id:str):
     projection_fractions=X["projection_fraction"].to_numpy(dtype=float)
     gps_displacements=X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track),k)[:,0]
     predicted=viterbi(candidate_ids,distances,scores.ravel(),arcs,k=k,time_gaps=time_gaps,
-                      gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S","5.0")),
+                      gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S",DECODER_PARAMS.get("gap_reset_s",5.0))),
+                      transition_penalty=DECODER_PARAMS.get("transition_penalty",3.0),
                       projection_fractions=projection_fractions,arc_lengths=arc_lengths,
-                      gps_displacements=gps_displacements)
+                      gps_displacements=gps_displacements,
+                      speed_weight=DECODER_PARAMS.get("speed_weight",0.015),
+                      max_speed_mps=DECODER_PARAMS.get("max_speed_mps",55.0),
+                      distance_scale_m=DECODER_PARAMS.get("distance_scale_m",80.0))
     edges=arcs[["from_node","to_node"]].to_numpy(dtype=int)
     good=total=0
     for a,b in zip(predicted[:-1],predicted[1:]):
