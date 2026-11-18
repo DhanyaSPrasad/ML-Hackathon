@@ -124,7 +124,8 @@ results=pd.DataFrame(rows).sort_values(["cv_top1_accuracy_mean","cv_top1_accurac
 results.to_csv(OUT/"model_comparison.csv",index=False)
 best=results.iloc[0].to_dict()
 (MOD/"model_metadata.json").write_text(json.dumps({
- "features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,
+ "schema_version":2,"features":FEATURES,"k_candidates":K,"candidate_pool":CANDIDATE_POOL,
+ "selected_classifier":best["model"],
  "observations_per_trip":"full resolution","random_seed":SEED,
  "cv":"5-fold GroupKFold grouped by trip ID",
  "label_definition":"Monotonic dynamic-programming alignment to ordered reference route; weak geometric supervision.",
@@ -135,5 +136,5 @@ best=results.iloc[0].to_dict()
  "selected_model":best["model"],"cv_top1_accuracy_mean":best["cv_top1_accuracy_mean"],
  "cv_top1_accuracy_std":best["cv_top1_accuracy_std"],"candidate_pool":CANDIDATE_POOL,
  "k_candidates":K,"features":FEATURES,"training_trips":len(train_ids),
- "student_test_used_for_selection":False},indent=2))
+ "student_test_used_for_selection":False,"schema_version":2},indent=2))
 print("Selected model:",best["model"],flush=True)
