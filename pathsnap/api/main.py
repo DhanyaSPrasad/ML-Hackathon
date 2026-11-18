@@ -29,6 +29,7 @@ except (FileNotFoundError, ValueError) as exc:
     logging.warning("Model artifact is unavailable or stale: %s",exc)
 MODEL_K=int(MODEL_METADATA["k_candidates"]) if MODEL_METADATA else 8
 CANDIDATE_POOL=int(MODEL_METADATA["candidate_pool"]) if MODEL_METADATA else 64
+CANDIDATE_RADIUS=float(MODEL_METADATA.get("candidate_radius_m",50.0)) if MODEL_METADATA else 50.0
 DECODER_PATH=ROOT/"pathsnap"/"models"/"decoder_metadata.json"
 try:
     DECODER_PARAMS=read_decoder_metadata(MODEL_DIR,MODEL_METADATA).get("best_params",{}) if MODEL_METADATA else {}
@@ -62,7 +63,7 @@ def predict(trip_id:str):
     # Critical leakage guard: do not read the reference route in the prediction path.
     track,nodes,arcs,_=read_trip(folder,include_route=False)
     net=make_network(nodes,arcs)
-    X,_,candidate_ids,distances,_=candidate_rows(track,net,route=None,k=MODEL_K,candidate_pool=CANDIDATE_POOL)
+    X,_,candidate_ids,distances,_=candidate_rows(track,net,route=None,k=MODEL_K,candidate_pool=CANDIDATE_POOL,radius_m=CANDIDATE_RADIUS)
     probabilities=model.predict_proba(X)[:,1] if hasattr(model,"predict_proba") else model.predict(X).astype(float)*0.98+0.01
     scores=probabilities.reshape(len(track),-1)
     scores=scores/(scores.sum(axis=1,keepdims=True)+1e-9)
@@ -75,13 +76,14 @@ def predict(trip_id:str):
     projection_fractions=X["projection_fraction"].to_numpy(dtype=float)
     gps_displacements=X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track),k)[:,0]
     predicted=viterbi(candidate_ids,distances,scores.ravel(),arcs,k=k,time_gaps=time_gaps,
-                      gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S",DECODER_PARAMS.get("gap_reset_s",5.0))),
-                      transition_penalty=DECODER_PARAMS.get("transition_penalty",3.0),
+                      gap_reset_s=float(os.environ.get("PATHSNAP_GAP_RESET_S",DECODER_PARAMS.get("gap_reset_s",60.0))),
+                      transition_penalty=DECODER_PARAMS.get("beta",100.0),
                       projection_fractions=projection_fractions,arc_lengths=arc_lengths,
                       gps_displacements=gps_displacements,
                       speed_weight=DECODER_PARAMS.get("speed_weight",0.015),
                       max_speed_mps=DECODER_PARAMS.get("max_speed_mps",55.0),
-                      distance_scale_m=DECODER_PARAMS.get("distance_scale_m",80.0))
+                      distance_scale_m=DECODER_PARAMS.get("distance_scale_m",80.0),
+                      uturn_penalty=DECODER_PARAMS.get("uturn_penalty",10.0))
     edges=arcs[["from_node","to_node"]].to_numpy(dtype=int)
     good=total=0
     for a,b in zip(predicted[:-1],predicted[1:]):
