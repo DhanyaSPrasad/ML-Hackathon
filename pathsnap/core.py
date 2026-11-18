@@ -283,7 +283,8 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
             for q, prev in enumerate(cand[t-1]):
                 if prev < 0 or prev >= len(edge):
                     continue
-                connected = edge[prev, 1] == current_from
+                same_arc = prev == aid
+                connected = same_arc or edge[prev, 1] == current_from
                 if reset:
                     transition = 0.0
                 elif not connected:
@@ -291,7 +292,10 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
                 else:
                     transition = 0.0
                     if len(lengths) > max(prev, aid):
-                        implied = max(0.0, lengths[prev] * (1.0 - frac[t-1, q])) + max(0.0, lengths[aid] * frac[t, j])
+                        if same_arc:
+                            implied = max(0.0, lengths[aid] * (frac[t, j] - frac[t-1, q]))
+                        else:
+                            implied = max(0.0, lengths[prev] * (1.0 - frac[t-1, q])) + max(0.0, lengths[aid] * frac[t, j])
                         observed = gps_move[t]
                         allowance = max(12.0, max_speed_mps * max(gaps[t], 0.0))
                         excess = max(0.0, implied - observed - allowance)
