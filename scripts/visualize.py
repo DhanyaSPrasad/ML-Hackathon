@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from folium import FeatureGroup
 from pathsnap.core import read_trip, make_network, candidate_rows, viterbi
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"; RES=ROOT/"pathsnap"/"results"; VIS=ROOT/"pathsnap"/"visuals"
 VIS.mkdir(parents=True,exist_ok=True)
 
@@ -37,8 +38,7 @@ folders=[p for p in sorted(base.iterdir()) if p.is_dir() and (p/f"{p.name}.track
 if not folders: raise RuntimeError("No student_test trips found")
 folder=folders[0]
 track,nodes,arcs,route=read_trip(folder,include_route=True); net=make_network(nodes,arcs)
-metadata=json.loads((ROOT/"pathsnap"/"models"/"model_metadata.json").read_text())
-decoder=json.loads((ROOT/"pathsnap"/"models"/"decoder_metadata.json").read_text()).get("best_params",{})
+decoder=read_decoder_metadata(ROOT/"pathsnap"/"models",metadata).get("best_params",{})
 X,_,cids,dists,_=candidate_rows(track,net,route=None,k=k,candidate_pool=int(metadata.get("candidate_pool",64)))
 probs=model.predict_proba(X)[:,1]; scores=probs.reshape(len(track),k); scores=scores/(scores.sum(axis=1,keepdims=True)+1e-9)
 time_gaps=np.r_[0.0,np.diff(track.timestamp.to_numpy(dtype=float))]
