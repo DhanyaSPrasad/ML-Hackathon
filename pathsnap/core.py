@@ -211,6 +211,16 @@ def candidate_rows(track, net, route=None, k=8, radius_m=50, candidate_pool=None
         distances, fractions = _point_segment_projection(
             gps_xy[i:i+1], net["a_xy"][selected], net["b_xy"][selected])
         d, f = distances[0], fractions[0]
+        # Radius is a true candidate constraint. If fewer than k roads fall
+        # inside it, fill remaining slots with the nearest available roads.
+        inside = np.flatnonzero(d <= max(float(radius_m), 0.0))
+        if len(inside) < kk:
+            outside = np.flatnonzero(d > max(float(radius_m), 0.0))
+            outside = outside[np.lexsort((net["ids"][selected[outside]], d[outside]))]
+            keep = np.concatenate((inside, outside[:kk-len(inside)]))
+        else:
+            keep = inside
+        selected, d, f = selected[keep], d[keep], f[keep]
         # Exact geometric ranking, with stable tie-breaking by original arc ID.
         order = np.lexsort((net["ids"][selected], d))[:kk]
         selected, d, f = selected[order], d[order], f[order]
