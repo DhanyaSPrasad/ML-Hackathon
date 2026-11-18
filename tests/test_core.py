@@ -9,11 +9,11 @@ class MapMatchingCoreTests(unittest.TestCase):
         # The long horizontal segment has a distant midpoint but passes through
         # the GPS fix. Exact in-radius ranking should select it.
         nodes = pd.DataFrame({
-            "lon": [-0.01, 0.01, 0.0001, 0.0002],
+            "lon": [-0.01, 0.01, -0.0091, -0.0089],
             "lat": [0.0, 0.0, 0.0001, 0.0001],
         })
         arcs = pd.DataFrame({"from_node": [0, 2], "to_node": [1, 3]})
-        track = pd.DataFrame({"lon": [0.0], "lat": [0.0], "timestamp": [1.0]})
+        track = pd.DataFrame({"lon": [-0.009], "lat": [0.0], "timestamp": [1.0]})
         net = make_network(nodes, arcs)
         _, _, candidate_ids, _, _ = candidate_rows(
             track, net, route=None, k=1, candidate_pool=1
