@@ -9,7 +9,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathsnap.core import read_trip, make_network, candidate_rows, viterbi, FEATURES
-from pathsnap.artifacts import read_model_metadata, validate_estimator
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 
 logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(message)s")
 log=logging.getLogger("pathsnap")
@@ -31,8 +31,9 @@ MODEL_K=int(MODEL_METADATA["k_candidates"]) if MODEL_METADATA else 8
 CANDIDATE_POOL=int(MODEL_METADATA["candidate_pool"]) if MODEL_METADATA else 64
 DECODER_PATH=ROOT/"pathsnap"/"models"/"decoder_metadata.json"
 try:
-    DECODER_PARAMS=json.loads(DECODER_PATH.read_text()).get("best_params",{})
-except (FileNotFoundError,ValueError):
+    DECODER_PARAMS=read_decoder_metadata(MODEL_DIR,MODEL_METADATA).get("best_params",{}) if MODEL_METADATA else {}
+except (FileNotFoundError,ValueError) as exc:
+    logging.warning("Tuned decoder metadata is unavailable or stale; using safe defaults: %s",exc)
     DECODER_PARAMS={}
 
 def partition_dir():
