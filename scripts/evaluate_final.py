@@ -13,7 +13,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from pathsnap.core import read_trip, make_network, candidate_rows, viterbi
-from pathsnap.artifacts import read_model_metadata, validate_estimator
+from pathsnap.artifacts import read_model_metadata, validate_estimator, read_decoder_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "Student folder"
@@ -22,7 +22,7 @@ OUT = ROOT / "pathsnap" / "results"
 metadata = read_model_metadata(MODELS)
 MODEL = validate_estimator(joblib.load(MODELS / "final_model.joblib"), metadata)
 k = int(metadata.get("k_candidates", 8))
-decoder = json.loads((MODELS / "decoder_metadata.json").read_text()).get("best_params", {})
+decoder = read_decoder_metadata(MODELS, metadata).get("best_params", {})
 
 
 def partition_path():
