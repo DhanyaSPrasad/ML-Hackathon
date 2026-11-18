@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pathsnap.core import FEATURES
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def read_model_metadata(models_dir):
@@ -34,8 +34,9 @@ def validate_metadata(metadata):
         )
     k = int(metadata.get("k_candidates", 0))
     pool = int(metadata.get("candidate_pool", 0))
-    if k < 1 or pool < k:
-        raise ValueError("Invalid candidate configuration in model_metadata.json")
+    radius = float(metadata.get("candidate_radius_m", 0))
+    if k < 1 or pool < k or radius <= 0:
+        raise ValueError("Invalid candidate count, pool or radius in model_metadata.json")
     return metadata
 
 
@@ -67,6 +68,7 @@ def read_decoder_metadata(models_dir, model_metadata):
         "features": list(FEATURES),
         "k_candidates": int(model_metadata["k_candidates"]),
         "candidate_pool": int(model_metadata["candidate_pool"]),
+        "candidate_radius_m": float(model_metadata["candidate_radius_m"]),
     }
     for key, value in expected.items():
         if decoder.get(key) != value:
