@@ -12,7 +12,7 @@ from pathsnap.artifacts import read_model_metadata
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results"; MOD=ROOT/"pathsnap"/"models"
 OUT.mkdir(parents=True,exist_ok=True); MOD.mkdir(parents=True,exist_ok=True)
-SEED=42; K=8; POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
+SEED=42; K=int(os.environ.get("PATHSNAP_K_CANDIDATES","8")); POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
 N_TRIALS=int(os.environ.get("PATHSNAP_TUNE_TRIALS","60"))
 
 

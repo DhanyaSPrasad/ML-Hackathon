@@ -17,7 +17,7 @@ from pathsnap.core import trip_features, FEATURES, viterbi
 ROOT=Path(__file__).resolve().parents[1]; DATA=ROOT/"Student folder"
 OUT=ROOT/"pathsnap"/"results"; MOD=ROOT/"pathsnap"/"models"; VIS=ROOT/"pathsnap"/"visuals"
 for p in (OUT,MOD,VIS): p.mkdir(parents=True,exist_ok=True)
-SEED=42; K=8; CANDIDATE_POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
+SEED=42; K=int(os.environ.get("PATHSNAP_K_CANDIDATES","8")); CANDIDATE_POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64")); RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
 
 
 def partition_path(name):
