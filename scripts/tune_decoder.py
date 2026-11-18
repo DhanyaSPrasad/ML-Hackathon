@@ -11,7 +11,7 @@ from pathsnap.artifacts import read_model_metadata
 
 ROOT=Path(__file__).resolve().parents[1];DATA=ROOT/"Student folder"
 MOD=ROOT/"pathsnap"/"models";OUT=ROOT/"pathsnap"/"results"
-K=8;POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"))
+K=8;POOL=int(os.environ.get("PATHSNAP_CANDIDATE_POOL","64"));RADIUS_M=float(os.environ.get("PATHSNAP_CANDIDATE_RADIUS_M","50"))
 TRIALS=int(os.environ.get("PATHSNAP_DECODER_TRIALS","60"))
 
 
@@ -29,7 +29,7 @@ def collect():
     xs=[];ys=[];groups=[];trips=[]
     folders=[p for p in sorted(partition_path("train").iterdir()) if p.is_dir() and (p/f"{p.name}.track").is_file()]
     for folder in folders:
-        track,nodes,arcs,route,net,X,y,cids,dists,target=trip_features(folder,k=K,candidate_pool=POOL)
+        track,nodes,arcs,route,net,X,y,cids,dists,target=trip_features(folder,k=K,candidate_pool=POOL,radius_m=RADIUS_M)
         candidates=cids.reshape(len(track),K);hit=np.any(candidates==target[:,None],axis=1)
         keep=np.repeat(hit,K)
         if keep.any():
@@ -57,7 +57,7 @@ if meta.get("features") != FEATURES or meta.get("features") != model_metadata.ge
     raise ValueError("Classifier tuning feature schema is stale; rerun scripts/train.py and scripts/tune.py")
 if int(meta.get("k_candidates", 0)) != int(model_metadata["k_candidates"]) or int(meta.get("candidate_pool", 0)) != int(model_metadata["candidate_pool"]):
     raise ValueError("Classifier tuning candidate configuration differs from model metadata")
-if K != int(model_metadata["k_candidates"]) or POOL != int(model_metadata["candidate_pool"]):
+if K != int(model_metadata["k_candidates"]) or POOL != int(model_metadata["candidate_pool"]) or RADIUS_M != float(model_metadata.get("candidate_radius_m", -1)):
     raise ValueError("Decoder tuning candidate settings differ from model metadata; use the same PATHSNAP_CANDIDATE_POOL as training.")
 X,y,groups,trips=collect()
 cv=GroupKFold(n_splits=min(5,len(np.unique(groups))))
@@ -90,7 +90,7 @@ study=optuna.create_study(direction="maximize",sampler=optuna.samplers.TPESample
 study.optimize(objective,n_trials=TRIALS,show_progress_bar=False)
 result={"classifier":kind,"method":"5-fold out-of-fold training predictions; no student/evaluator test labels",
  "trials":TRIALS,"best_params":study.best_params,"best_oof_top1_accuracy":study.best_value,
- "features":FEATURES,"k_candidates":K,"candidate_pool":POOL,"schema_version":2}
+ "features":FEATURES,"k_candidates":K,"candidate_pool":POOL,"candidate_radius_m":RADIUS_M,"schema_version":3}
 (MOD/"decoder_metadata.json").write_text(json.dumps(result,indent=2))
 pd.DataFrame([{"trial":t.number,"value":t.value,**t.params} for t in study.trials]).to_csv(OUT/"decoder_trials.csv",index=False)
 print(json.dumps(result,indent=2))
