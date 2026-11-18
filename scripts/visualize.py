@@ -37,10 +37,19 @@ folders=[p for p in sorted(base.iterdir()) if p.is_dir() and (p/f"{p.name}.track
 if not folders: raise RuntimeError("No student_test trips found")
 folder=folders[0]
 track,nodes,arcs,route=read_trip(folder,include_route=True); net=make_network(nodes,arcs)
-X,_,cids,dists,_=candidate_rows(track,net,route=None,k=k)
+metadata=json.loads((ROOT/"pathsnap"/"models"/"model_metadata.json").read_text())
+decoder=json.loads((ROOT/"pathsnap"/"models"/"decoder_metadata.json").read_text()).get("best_params",{})
+X,_,cids,dists,_=candidate_rows(track,net,route=None,k=k,candidate_pool=int(metadata.get("candidate_pool",64)))
 probs=model.predict_proba(X)[:,1]; scores=probs.reshape(len(track),k); scores=scores/(scores.sum(axis=1,keepdims=True)+1e-9)
 time_gaps=np.r_[0.0,np.diff(track.timestamp.to_numpy(dtype=float))]
-pred=viterbi(cids,dists,scores.ravel(),arcs,k=k,time_gaps=time_gaps,gap_reset_s=5.0)
+arc_lengths=np.zeros(len(arcs),dtype=float);arc_lengths[net["ids"]]=net["lengths"]
+fractions=X["projection_fraction"].to_numpy(dtype=float)
+displacement=X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track),k)[:,0]
+pred=viterbi(cids,dists,scores.ravel(),arcs,k=k,time_gaps=time_gaps,
+    transition_penalty=decoder.get("transition_penalty",3.0),gap_reset_s=decoder.get("gap_reset_s",5.0),
+    projection_fractions=fractions,arc_lengths=arc_lengths,gps_displacements=displacement,
+    speed_weight=decoder.get("speed_weight",0.015),max_speed_mps=decoder.get("max_speed_mps",55.0),
+    distance_scale_m=decoder.get("distance_scale_m",80.0))
 center=[float(track.lat.mean()),float(track.lon.mean())]
 m=folium.Map(location=center,zoom_start=14,control_scale=True)
 gps_group=FeatureGroup(name="Observed GPS trajectory",show=True)
