@@ -22,6 +22,8 @@ OUT = ROOT / "pathsnap" / "results"
 metadata = read_model_metadata(MODELS)
 MODEL = validate_estimator(joblib.load(MODELS / "final_model.joblib"), metadata)
 k = int(metadata.get("k_candidates", 8))
+radius_m = float(metadata["candidate_radius_m"])
+candidate_pool = int(metadata.get("candidate_pool", 64))
 decoder = read_decoder_metadata(MODELS, metadata).get("best_params", {})
 
 
@@ -37,7 +39,7 @@ def infer_without_labels(folder):
     network = make_network(nodes, arcs)
     X, _, candidate_ids, distances, _ = candidate_rows(
         track, network, route=None, k=k,
-        candidate_pool=int(metadata.get("candidate_pool", 64)))
+        radius_m=radius_m, candidate_pool=candidate_pool)
     probabilities = MODEL.predict_proba(X)[:, 1]
     scores = probabilities.reshape(len(track), k)
     scores = scores / (scores.sum(axis=1, keepdims=True) + 1e-9)
@@ -50,12 +52,10 @@ def infer_without_labels(folder):
     displacement = X["gps_displacement_m"].to_numpy(dtype=float).reshape(len(track), k)[:, 0]
     decoded = viterbi(
         candidate_ids, distances, scores.reshape(-1), arcs, k=k,
-        time_gaps=gaps, transition_penalty=float(decoder.get("transition_penalty", 3.0)),
-        gap_reset_s=float(decoder.get("gap_reset_s", 5.0)),
+        time_gaps=gaps, gap_reset_s=float(decoder.get("gap_reset_s", 60.0)),
         projection_fractions=fractions, arc_lengths=arc_lengths,
-        gps_displacements=displacement,
-        speed_weight=float(decoder.get("speed_weight", 0.015)),
-        max_speed_mps=float(decoder.get("max_speed_mps", 55.0)),
+        gps_displacements=displacement, beta=float(decoder.get("beta", 100.0)),
+        uturn_penalty=float(decoder.get("uturn_penalty", 10.0)),
         distance_scale_m=float(decoder.get("distance_scale_m", 80.0)),
     )
     return track, network, candidates, classifier, decoded
@@ -77,7 +77,7 @@ for folder in folders:
     _, _, _, reference_route = read_trip(folder, include_route=True)
     _, _, _, _, target = candidate_rows(
         track, network, route=reference_route, k=k,
-        candidate_pool=int(metadata.get("candidate_pool", 64)))
+        radius_m=radius_m, candidate_pool=candidate_pool)
     valid = target >= 0
     miss = np.asarray([target[i] not in candidates[i] for i in range(len(track))])
     n_valid = int(valid.sum())
