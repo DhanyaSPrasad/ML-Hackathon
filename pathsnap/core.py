@@ -245,7 +245,7 @@ def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=Non
 def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
             time_gaps=None, gap_reset_s=5.0, projection_fractions=None,
             arc_lengths=None, gps_displacements=None, speed_weight=0.015,
-            max_speed_mps=55.0):
+            max_speed_mps=55.0, distance_scale_m=80.0):
     """Gap-aware Viterbi with directed connectivity and movement feasibility.
 
     Emissions combine classifier log-scores and geometric distance. Connected
@@ -269,7 +269,7 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
     frac = np.full((n, k), 0.5) if projection_fractions is None else np.asarray(projection_fractions, dtype=float).reshape(n, k)
     lengths = np.zeros(len(arcs), dtype=float) if arc_lengths is None else np.asarray(arc_lengths, dtype=float)
     gps_move = np.zeros(n, dtype=float) if gps_displacements is None else np.asarray(gps_displacements, dtype=float)
-    dp = np.log(np.maximum(prob[0], 1e-9)) - dist[0] / 80.0
+    dp = np.log(np.maximum(prob[0], 1e-9)) - dist[0] / max(float(distance_scale_m), 1e-6)
     back = np.zeros((n, k), dtype=np.int32)
     for t in range(1, n):
         reset = gaps[t] > gap_reset_s or gaps[t] <= 0
@@ -300,13 +300,13 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
                 value = dp[t-1, q] + transition
                 if value > best_value:
                     best_value, best_prev = value, q
-            dp_current = best_value + np.log(max(prob[t, j], 1e-9)) - dist[t, j] / 80.0
+            dp_current = best_value + np.log(max(prob[t, j], 1e-9)) - dist[t, j] / max(float(distance_scale_m), 1e-6)
             if j == 0:
                 next_row = np.full(k, -1e12, dtype=float)
             next_row[j] = dp_current
             back[t, j] = best_prev
         if np.all(next_row <= -1e11):
-            next_row = np.log(np.maximum(prob[t], 1e-9)) - dist[t] / 80.0
+            next_row = np.log(np.maximum(prob[t], 1e-9)) - dist[t] / max(float(distance_scale_m), 1e-6)
         dp = next_row
     state = int(np.argmax(dp))
     out = np.zeros(n, dtype=int)
