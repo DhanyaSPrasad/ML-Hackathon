@@ -1,0 +1,11 @@
+{
+  "partition": "evaluator_test",
+  "model_artifact": "pathsnap/models/final_model.joblib",
+  "k_candidates": 8,
+  "decoder": {},
+  "observations": 19674,
+  "candidate_miss_rate": 0.07248144759581174,
+  "classifier_top1_accuracy": 0.6686998068516824,
+  "decoded_top1_accuracy": 0.5011182271017587,
+  "reference_labels_used_for_inference_or_selection": false
+}
