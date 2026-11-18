@@ -42,13 +42,8 @@ def build_model(kind, trial=None, params=None):
     """Build one estimator from either an Optuna trial or a frozen parameter dict."""
     p = params or {}
 
-    def value(name, suggest, *args, **kwargs):
-        if trial is not None:
-            return suggest(name, *args, **kwargs)
-        return p[name]
-
     if kind == "Logistic Regression":
-        c = value("C", trial.suggest_float if trial else None, 1e-3, 100.0, log=True) if trial else p["C"]
+        c = trial.suggest_float("C", 1e-3, 100.0, log=True) if trial else p["C"]
         estimator = LogisticRegression(C=c, max_iter=1500, class_weight="balanced", random_state=SEED)
         return make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), estimator)
 
