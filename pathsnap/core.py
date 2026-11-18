@@ -187,12 +187,14 @@ def candidate_rows(track, net, route=None, k=8, radius_m=50, candidate_pool=None
     spatial_radius = max(0.0, float(radius_m)) + max_half_length
 
     gaps = np.ones(n, dtype=float)
+    valid_context_gap = np.zeros(n, dtype=bool)
     speed = np.zeros(n, dtype=float)
     displacement = np.zeros(n, dtype=float)
     gps_heading = np.zeros(n, dtype=float)
     if n > 1:
         raw_gaps = np.diff(track.timestamp.to_numpy(dtype=float))
         gaps[1:] = np.maximum(raw_gaps, 0.01)
+        valid_context_gap[1:] = (raw_gaps > 0.0) & (raw_gaps <= 60.0)
         displacement[1:] = haversine(coords[:-1, 0], coords[:-1, 1], coords[1:, 0], coords[1:, 1])
         speed[1:] = displacement[1:] / gaps[1:]
         gps_heading[1:] = bearing(coords[:-1, 0], coords[:-1, 1], coords[1:, 0], coords[1:, 1])
@@ -241,8 +243,8 @@ def candidate_rows(track, net, route=None, k=8, radius_m=50, candidate_pool=None
         lo = i * kk
         hi = lo + len(projected_by_obs[i])
         current = projected_by_obs[i]
-        previous_ok = i > 0 and 0.0 < gaps[i] <= 60.0
-        next_ok = i < n - 1 and 0.0 < gaps[i + 1] <= 60.0
+        previous_ok = i > 0 and bool(valid_context_gap[i])
+        next_ok = i < n - 1 and bool(valid_context_gap[i + 1])
         for j, point in enumerate(current):
             row = rows[lo + j]
             if previous_ok:
