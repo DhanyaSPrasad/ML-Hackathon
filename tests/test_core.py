@@ -34,6 +34,19 @@ class MapMatchingCoreTests(unittest.TestCase):
         )
         self.assertEqual(predicted.tolist(), [0, 0])
 
+    def test_viterbi_uses_accumulated_scores_across_multiple_steps(self):
+        arcs = pd.DataFrame({"from_node": [0, 1, 2], "to_node": [1, 2, 3]})
+        predicted = viterbi(
+            candidate_ids=np.array([0, 1, 1, 2, 2, 1]),
+            distances=np.array([1.0, 2.0, 1.0, 2.0, 1.0, 2.0]),
+            scores=np.array([0.8, 0.2, 0.8, 0.2, 0.8, 0.2]),
+            arcs=arcs,
+            k=2,
+            time_gaps=np.array([0.0, 1.0, 1.0]),
+            transition_penalty=8.0,
+        )
+        self.assertEqual(predicted.tolist(), [0, 1, 2])
+
     def test_current_artifact_metadata_is_accepted(self):
         metadata = {"features": list(FEATURES), "observations_per_trip": "full resolution",
                     "k_candidates": 8, "candidate_pool": 64}
