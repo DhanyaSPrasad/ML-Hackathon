@@ -31,7 +31,9 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Python 3.10+ is supported. For a quick tuning smoke test, set `$env:PATHSNAP_TUNE_TRIALS="2"` and `$env:PATHSNAP_DECODER_TRIALS="2"`. The full experiment defaults to 60 classifier trials and 60 decoder trials. Training and inference always use the complete original GPS tracks.
+`$env:PATHSNAP_CANDIDATE_POOL="64"` can be set to keep candidate generation identical across training, tuning, evaluation and API inference. The generated metadata records both candidate count and pool size; the API reads these values from the same metadata.
+
+Python 3.10+ is supported. For a quick tuning smoke test, set `$env:PATHSNAP_TUNE_TRIALS="2"` and `$env:PATHSNAP_DECODER_TRIALS="2"`. The full experiment defaults to 60 classifier trials and 60 decoder trials. Training and inference always use the complete original GPS tracks. Existing committed model/result JSON files may predate the current 16-feature, full-resolution pipeline. They are historical outputs, not evidence of current performance; regenerate them by running the workflow from `train.py` onward. The API now refuses stale/mismatched model artifacts rather than silently serving them.
 
 ## Reproducible workflow
 
@@ -42,16 +44,19 @@ python scripts/explore.py
 python scripts/train.py
 python scripts/tune.py
 python scripts/tune_decoder.py
+python scripts/check_artifacts.py
 python scripts/evaluate.py
 python scripts/visualize.py
 python -m unittest discover -s tests -v
 ```
 
-After model and decoder settings are frozen, run `python scripts/evaluate_final.py` once when the organiser's `evaluator_test` partition is available. Do not use its results to tune or select models.
+Run `python scripts/check_artifacts.py` after tuning and before evaluation/deployment. It verifies that the model, feature schema, candidate count, candidate pool, classifier selection and decoder metadata all describe the same pipeline. It does not access any dataset partition.
+
+After model and decoder settings are frozen and the artifact check passes, run `python scripts/evaluate_final.py` once when the organiser's `evaluator_test` partition is available. Do not use its results to tune or select models.
 
 ## Pipeline
 
-1. **Candidate generation** (`pathsnap/core.py`): a KD-tree midpoint index provides a broad-phase shortlist. The search radius is expanded by half the longest segment length, ensuring that every road segment within the configured GPS radius is included. A nearest-midpoint fallback is added, then exact point-to-segment distance ranks candidates. The best eight directed arcs are retained.
+1. **Candidate generation** (`pathsnap/core.py`): a KD-tree midpoint index provides a broad-phase shortlist. The search radius is expanded by half the longest segment length, ensuring that every road segment within the configured GPS radius is included. A nearest-midpoint fallback is added, then exact point-to-segment distance ranks candidates. The best `k_candidates` directed arcs are retained (default: 8). The selected value and broad-phase candidate pool are recorded in `model_metadata.json` and reused by evaluation and the API.
 2. **Features**: geometric distance, heading difference, road length, GPS speed, time gap, heading change, candidate rank, projection fraction, heading alignment, displacement, circular bearing features and endpoint distances. All features are calculated on full-resolution tracks; training, validation and inference therefore use the same temporal semantics.
 3. **Weak labels**: a monotonic dynamic-programming alignment maps observations to the ordered reference-route sequence. It combines point-to-segment distance with weak heading evidence when movement is observable. This is not independently verified ground truth. Observations whose target is absent from their candidate set are excluded from binary classifier fitting, but remain counted as Top-1 errors during evaluation.
 4. **Five-model comparison** (`scripts/train.py`): Logistic Regression, KNN, Decision Tree, Random Forest and Extra Trees. Five-fold `GroupKFold` groups by trip ID. The selected model maximizes mean observation-level Top-1 accuracy on training-only folds. Student-test metrics are reported separately.
