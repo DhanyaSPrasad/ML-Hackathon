@@ -1,4 +1,4 @@
-"""Compare the five required classifiers using trip-grouped observation Top-1 CV."""
+"""Compare classifiers (including LightGBM) using trip-grouped Top-1 CV."""
 from pathlib import Path
 import os, sys, json, time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,12 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
+from pathsnap.modeling import make_models
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, log_loss
 from pathsnap.core import trip_features, FEATURES, viterbi
 
@@ -56,16 +51,6 @@ def collect(name):
             print("WARN",name,folder.name,repr(exc),flush=True)
     if not rows: raise RuntimeError(f"No usable trips in {base}")
     return pd.concat(rows,ignore_index=True),np.concatenate(targets),np.asarray(groups),trips,ids
-
-
-def make_models():
-    return {
-      "Logistic Regression":make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),LogisticRegression(max_iter=1000,class_weight="balanced",C=1.0,random_state=SEED)),
-      "K-Nearest Neighbours":make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),KNeighborsClassifier(n_neighbors=7,weights="distance")),
-      "Decision Tree":make_pipeline(SimpleImputer(strategy="median"),DecisionTreeClassifier(max_depth=12,min_samples_leaf=4,class_weight="balanced",random_state=SEED)),
-      "Random Forest":make_pipeline(SimpleImputer(strategy="median"),RandomForestClassifier(n_estimators=200,max_depth=16,min_samples_leaf=3,class_weight="balanced_subsample",n_jobs=-1,random_state=SEED)),
-      "Extra Trees":make_pipeline(SimpleImputer(strategy="median"),ExtraTreesClassifier(n_estimators=200,max_depth=18,min_samples_leaf=3,class_weight="balanced",n_jobs=-1,random_state=SEED)),
-    }
 
 
 def candidate_prob(model,X):
