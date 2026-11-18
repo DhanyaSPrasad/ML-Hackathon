@@ -79,7 +79,7 @@ def predict(trip_id:str):
     edges=arcs[["from_node","to_node"]].to_numpy(dtype=int)
     good=total=0
     for a,b in zip(predicted[:-1],predicted[1:]):
-        if 0<=a<len(edges) and 0<=b<len(edges): total+=1; good+=int(edges[a,1]==edges[b,0])
+        if 0<=a<len(edges) and 0<=b<len(edges): total+=1; good+=int(a==b or edges[a,1]==edges[b,0])
     # Evaluation labels are loaded only after inference and never enter the
     # feature matrix, model, decoder or response as raw route/arc labels.
     metrics = None
