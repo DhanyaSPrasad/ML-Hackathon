@@ -6,12 +6,18 @@ from scipy.spatial import cKDTree
 
 # Keep this schema in sync with model_metadata.json. Angles are represented
 # both as differences and sine/cosine pairs to avoid the 0/360 discontinuity.
-FEATURES = [
+BASE_FEATURES = [
     "distance_m", "bearing_diff", "road_length_m",
     "gps_speed_mps", "time_gap_s", "heading_change", "candidate_rank",
     "projection_fraction", "segment_alignment", "gps_displacement_m",
     "road_bearing_sin", "road_bearing_cos", "gps_heading_sin",
     "gps_heading_cos", "distance_to_start_m", "distance_to_end_m",
+]
+# Candidate-context features inspired by the stronger PathSnap implementation.
+FEATURES = BASE_FEATURES + [
+    "distance_minus_min_m", "candidate_count", "abs_heading_alignment",
+    "turn_rate_rad_s", "distance_to_previous_fix_m", "distance_to_next_fix_m",
+    "previous_candidate_m", "next_candidate_m",
 ]
 EARTH_RADIUS_M = 6_371_000.0
 
@@ -161,7 +167,7 @@ def _sequence_route_targets(track, net, route, gps_xy, gps_heading):
     return route_ids[positions]
 
 
-def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=None):
+def candidate_rows(track, net, route=None, k=8, radius_m=50, candidate_pool=None):
     """Build exact point-to-segment-ranked candidates and optional weak labels.
 
     Midpoint indexing is only a broad-phase shortlist. Exact segment distances
@@ -226,10 +232,45 @@ def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=Non
             candidate_dists.append(float(dist))
             candidate_fracs.append(float(frac))
 
-    X = pd.DataFrame(rows, columns=FEATURES)
+    X = pd.DataFrame(rows, columns=BASE_FEATURES)
     candidate_ids = np.asarray(candidate_ids, dtype=int)
     candidate_dists = np.asarray(candidate_dists, dtype=float)
     candidate_fracs = np.asarray(candidate_fracs, dtype=float)
+
+    # Context features use only GPS geometry and candidate projections, never
+    # reference-route labels. Neighbour context is cut at nonpositive or >60s gaps.
+    candidate_matrix = candidate_ids.reshape(n, kk)
+    distance_matrix = candidate_dists.reshape(n, kk)
+    fraction_matrix = candidate_fracs.reshape(n, kk)
+    id_to_pos = {int(aid): pos for pos, aid in enumerate(net["ids"])}
+    positions = np.asarray([id_to_pos[int(aid)] for aid in candidate_ids], dtype=int)
+    projected = (net["a_xy"][positions] +
+                 fraction_matrix.reshape(-1, 1) *
+                 (net["b_xy"][positions] - net["a_xy"][positions])).reshape(n, kk, 2)
+    previous_candidate = np.zeros((n, kk), dtype=float)
+    next_candidate = np.zeros((n, kk), dtype=float)
+    previous_fix = np.zeros((n, kk), dtype=float)
+    next_fix = np.zeros((n, kk), dtype=float)
+    raw_gaps = np.diff(track.timestamp.to_numpy(dtype=float))
+    for i in range(n):
+        if i > 0 and 0 < raw_gaps[i-1] <= 60:
+            previous_candidate[i] = np.linalg.norm(
+                projected[i, :, None, :] - projected[i-1, None, :, :], axis=2).min(axis=1)
+            previous_fix[i] = np.linalg.norm(projected[i] - gps_xy[i-1], axis=1)
+        if i < n-1 and 0 < raw_gaps[i] <= 60:
+            next_candidate[i] = np.linalg.norm(
+                projected[i, :, None, :] - projected[i+1, None, :, :], axis=2).min(axis=1)
+            next_fix[i] = np.linalg.norm(projected[i] - gps_xy[i+1], axis=1)
+    dt_safe = np.maximum(gaps, 0.01)
+    turn_rate = np.radians(heading_change) / dt_safe
+    X["distance_minus_min_m"] = (distance_matrix - distance_matrix.min(axis=1, keepdims=True)).ravel()
+    X["candidate_count"] = float(kk)
+    X["abs_heading_alignment"] = np.abs(X["segment_alignment"].to_numpy(dtype=float))
+    X["turn_rate_rad_s"] = np.repeat(turn_rate, kk)
+    X["distance_to_previous_fix_m"] = previous_fix.ravel()
+    X["distance_to_next_fix_m"] = next_fix.ravel()
+    X["previous_candidate_m"] = previous_candidate.ravel()
+    X["next_candidate_m"] = next_candidate.ravel()
     target = np.full(n, -1, dtype=int)
     y = None
     if route is not None and len(route):
@@ -242,16 +283,19 @@ def candidate_rows(track, net, route=None, k=8, radius_m=180, candidate_pool=Non
     return X, y, candidate_ids, candidate_dists, target
 
 
-def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
-            time_gaps=None, gap_reset_s=5.0, projection_fractions=None,
+def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=100.0,
+            time_gaps=None, gap_reset_s=60.0, projection_fractions=None,
             arc_lengths=None, gps_displacements=None, speed_weight=0.015,
-            max_speed_mps=55.0, distance_scale_m=80.0):
-    """Gap-aware Viterbi with directed connectivity and movement feasibility.
+            max_speed_mps=55.0, distance_scale_m=80.0, uturn_penalty=10.0,
+            max_network_distance_m=3000.0):
+    """Directed-network HMM/Viterbi with bounded shortest-path transitions.
 
-    Emissions combine classifier log-scores and geometric distance. Connected
-    transitions receive a soft movement-consistency cost based on the distance
-    implied by the two segment projections and the observed GPS displacement.
+    Transition likelihood penalizes disagreement between directed road-network
+    distance and observed GPS displacement. Dijkstra results are cached per
+    source node for the duration of one trip.
     """
+    import heapq
+
     candidate_ids = np.asarray(candidate_ids, dtype=int)
     scores = np.asarray(scores, dtype=float)
     if len(scores) == 0:
@@ -259,7 +303,9 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
     if k < 1 or len(candidate_ids) != len(scores) or len(scores) % k:
         raise ValueError("Candidate arrays must contain exactly k states per observation")
     n = len(scores) // k
-    cand, dist, prob = candidate_ids.reshape(n, k), np.asarray(distances, dtype=float).reshape(n, k), scores.reshape(n, k)
+    cand = candidate_ids.reshape(n, k)
+    dist = np.asarray(distances, dtype=float).reshape(n, k)
+    prob = np.clip(scores.reshape(n, k), 1e-9, 1.0)
     edge = arcs[["from_node", "to_node"]].to_numpy(dtype=int)
     gaps = np.ones(n, dtype=float) if time_gaps is None else np.asarray(time_gaps, dtype=float)
     if len(gaps) == n - 1:
@@ -269,59 +315,97 @@ def viterbi(candidate_ids, distances, scores, arcs, k=8, transition_penalty=3.0,
     frac = np.full((n, k), 0.5) if projection_fractions is None else np.asarray(projection_fractions, dtype=float).reshape(n, k)
     lengths = np.zeros(len(arcs), dtype=float) if arc_lengths is None else np.asarray(arc_lengths, dtype=float)
     gps_move = np.zeros(n, dtype=float) if gps_displacements is None else np.asarray(gps_displacements, dtype=float)
-    dp = np.log(np.maximum(prob[0], 1e-9)) - dist[0] / max(float(distance_scale_m), 1e-6)
+    adjacency = {}
+    reverse_pairs = set()
+    for aid, (u, v) in enumerate(edge):
+        if aid < len(lengths) and lengths[aid] > 0:
+            adjacency.setdefault(int(u), []).append((int(v), float(lengths[aid])))
+            reverse_pairs.add((int(u), int(v)))
+    shortest_cache = {}
+
+    def shortest_from(source):
+        source = int(source)
+        if source in shortest_cache:
+            return shortest_cache[source]
+        distances_from = {source: 0.0}
+        queue = [(0.0, source)]
+        while queue:
+            cost, node = heapq.heappop(queue)
+            if cost != distances_from.get(node):
+                continue
+            if cost > max_network_distance_m:
+                continue
+            for nxt, weight in adjacency.get(node, ()):
+                new_cost = cost + weight
+                if new_cost <= max_network_distance_m and new_cost < distances_from.get(nxt, np.inf):
+                    distances_from[nxt] = new_cost
+                    heapq.heappush(queue, (new_cost, nxt))
+        shortest_cache[source] = distances_from
+        return distances_from
+
+    def emission(t):
+        return np.log(prob[t]) - dist[t] / max(float(distance_scale_m), 1e-6)
+
+    dp = emission(0)
     back = np.zeros((n, k), dtype=np.int32)
     for t in range(1, n):
         reset = gaps[t] > gap_reset_s or gaps[t] <= 0
+        next_row = np.full(k, -np.inf, dtype=float)
+        best_global_prev = int(np.argmax(dp))
         for j, aid in enumerate(cand[t]):
             if aid < 0 or aid >= len(edge):
-                if j == 0:
-                    next_row = np.full(k, -1e12, dtype=float)
                 continue
-            current_from = edge[aid, 0]
-            best_value, best_prev = -np.inf, 0
+            best_value, best_prev = -np.inf, best_global_prev
             for q, prev in enumerate(cand[t-1]):
                 if prev < 0 or prev >= len(edge):
                     continue
-                same_arc = prev == aid
-                connected = same_arc or edge[prev, 1] == current_from
                 if reset:
                     transition = 0.0
-                elif not connected:
-                    transition = -transition_penalty
                 else:
-                    transition = 0.0
-                    if len(lengths) > max(prev, aid):
-                        if same_arc:
-                            implied = max(0.0, lengths[aid] * (frac[t, j] - frac[t-1, q]))
+                    prev_from, prev_to = map(int, edge[prev])
+                    curr_from, curr_to = map(int, edge[aid])
+                    if prev == aid:
+                        network_distance = max(0.0, float(lengths[aid]) * (frac[t, j] - frac[t-1, q]))
+                        if frac[t, j] + 1e-6 < frac[t-1, q]:
+                            transition = -float(uturn_penalty)
                         else:
-                            implied = max(0.0, lengths[prev] * (1.0 - frac[t-1, q])) + max(0.0, lengths[aid] * frac[t, j])
-                        observed = gps_move[t]
-                        allowance = max(12.0, max_speed_mps * max(gaps[t], 0.0))
-                        excess = max(0.0, implied - observed - allowance)
-                        transition -= speed_weight * abs(implied - observed)
-                        transition -= 0.08 * excess
-                value = dp[t-1, q] + transition
+                            transition = -abs(network_distance - gps_move[t]) / max(float(transition_penalty), 1e-6)
+                    else:
+                        middle = shortest_from(prev_to).get(curr_from, np.inf)
+                        if not np.isfinite(middle):
+                            continue
+                        network_distance = (max(0.0, float(lengths[prev]) * (1.0-frac[t-1, q]))
+                                            + middle
+                                            + max(0.0, float(lengths[aid]) * frac[t, j]))
+                        if network_distance > max_network_distance_m:
+                            continue
+                        transition = -abs(network_distance - gps_move[t]) / max(float(transition_penalty), 1e-6)
+                        if (curr_from, curr_to) == (prev_to, prev_from):
+                            transition -= float(uturn_penalty)
+                    allowance = max(12.0, float(max_speed_mps) * max(float(gaps[t]), 0.0))
+                    if network_distance > gps_move[t] + allowance:
+                        transition -= float(speed_weight) * (network_distance-gps_move[t]-allowance)
+                value = dp[q] + transition
                 if value > best_value:
                     best_value, best_prev = value, q
-            dp_current = best_value + np.log(max(prob[t, j], 1e-9)) - dist[t, j] / max(float(distance_scale_m), 1e-6)
-            if j == 0:
-                next_row = np.full(k, -1e12, dtype=float)
-            next_row[j] = dp_current
+            if not np.isfinite(best_value):
+                best_value, best_prev = dp[best_global_prev], best_global_prev
+            next_row[j] = best_value + emission(t)[j]
             back[t, j] = best_prev
-        if np.all(next_row <= -1e11):
-            next_row = np.log(np.maximum(prob[t], 1e-9)) - dist[t] / max(float(distance_scale_m), 1e-6)
+        if not np.isfinite(next_row).any():
+            next_row = emission(t)
+            back[t, :] = best_global_prev
         dp = next_row
     state = int(np.argmax(dp))
     out = np.zeros(n, dtype=int)
-    for t in range(n - 1, -1, -1):
+    for t in range(n-1, -1, -1):
         out[t] = cand[t, state]
         if t:
             state = int(back[t, state])
     return out
 
 
-def trip_features(folder, k=8, max_observations=None, candidate_pool=None):
+def trip_features(folder, k=8, max_observations=None, candidate_pool=None, radius_m=50):
     track, nodes, arcs, route = read_trip(folder, include_route=True)
     # Never downsample before deriving temporal features: this preserves the
     # exact same adjacent-fix semantics in training, validation and inference.
@@ -329,5 +413,5 @@ def trip_features(folder, k=8, max_observations=None, candidate_pool=None):
         raise ValueError("Observation subsampling is disabled; train and infer on the same full-resolution track")
     net = make_network(nodes, arcs)
     X, y, cids, dists, target = candidate_rows(
-        track, net, route, k=k, candidate_pool=candidate_pool)
+        track, net, route, k=k, radius_m=radius_m, candidate_pool=candidate_pool)
     return track, nodes, arcs, route, net, X, y, cids, dists, target
