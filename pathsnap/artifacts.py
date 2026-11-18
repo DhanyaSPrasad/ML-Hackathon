@@ -54,3 +54,24 @@ def validate_estimator(model, metadata):
             "Serialized model feature names/order do not match pathsnap.core.FEATURES."
         )
     return model
+
+
+def read_decoder_metadata(models_dir, model_metadata):
+    """Load decoder settings only when they were tuned for this exact model setup."""
+    path = Path(models_dir) / "decoder_metadata.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing {path}. Run scripts/tune_decoder.py first.")
+    decoder = json.loads(path.read_text(encoding="utf-8"))
+    expected = {
+        "classifier": model_metadata.get("selected_classifier"),
+        "features": list(FEATURES),
+        "k_candidates": int(model_metadata["k_candidates"]),
+        "candidate_pool": int(model_metadata["candidate_pool"]),
+    }
+    for key, value in expected.items():
+        if decoder.get(key) != value:
+            raise ValueError(
+                f"decoder_metadata.json {key}={decoder.get(key)!r} does not match "
+                f"the current model configuration {value!r}. Rerun scripts/tune_decoder.py."
+            )
+    return decoder
